@@ -54,7 +54,7 @@ export default function VerifyEmail() {
     if (code.length < 6) return toast.error('Enter the full 6-digit code')
     setLoading(true)
     try {
-      const res = await api.post('/api/auth/verify-otp', { email, otp: code }, { withCredentials: true })
+      const res = await api.post('/api/auth/verify-otp', { email, otp: code })
       setUser(res.data)
       toast.success('Email verified! Welcome to IdeaSlate 🎉')
       navigate('/dashboard')

@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext'
 import { useAuth } from '../context/AuthContext'
 import { Logo, LogoWordmark } from '../components/Logo'
 import { io } from 'socket.io-client'
-import axios from 'axios'
+import api from '../api/axios'
 import toast from 'react-hot-toast'
 
 
@@ -213,11 +213,11 @@ export default function Board() {
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
       try {
-        const res = await axios.get(`/api/boards/${roomId}`, { withCredentials: true })
+        const res = await api.get(`/api/boards/${roomId}`, { withCredentials: true })
         if (res.data.canvasJSON) { await canvas.loadFromJSON(JSON.parse(res.data.canvasJSON)); canvas.renderAll() }
       } catch {}
 
-      socketRef.current = io('http://localhost:5000', { withCredentials: true })
+      socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true })
       socketRef.current.emit('join-room', roomId)
       socketRef.current.on('canvas:draw', async (json) => {
         isReceiving.current = true
@@ -318,7 +318,7 @@ export default function Board() {
 
   const saveBoard = async () => {
     try {
-      await axios.put(`/api/boards/${roomId}`, { canvasJSON: JSON.stringify(fabricRef.current.toJSON(['id'])) }, { withCredentials: true })
+      await api.put(`/api/boards/${roomId}`, { canvasJSON: JSON.stringify(fabricRef.current.toJSON(['id'])) }, { withCredentials: true })
       toast.success('Board saved!')
     } catch { toast.error('Failed to save') }
   }
