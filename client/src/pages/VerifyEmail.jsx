@@ -54,7 +54,7 @@ export default function VerifyEmail() {
     if (code.length < 6) return toast.error('Enter the full 6-digit code')
     setLoading(true)
     try {
-      const res = await axios.post('/api/auth/verify-otp', { email, otp: code }, { withCredentials: true })
+      const res = await api.post('/api/auth/verify-otp', { email, otp: code }, { withCredentials: true })
       setUser(res.data)
       toast.success('Email verified! Welcome to IdeaSlate 🎉')
       navigate('/dashboard')
@@ -70,7 +70,7 @@ export default function VerifyEmail() {
   const handleResend = async () => {
     setResending(true)
     try {
-      await axios.post('/api/auth/resend-otp', { email })
+      await api.post('/api/auth/resend-otp', { email })
       toast.success('New code sent!')
       setCountdown(60)
       setOtp(['', '', '', '', '', ''])

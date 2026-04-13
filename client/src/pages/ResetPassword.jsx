@@ -18,7 +18,7 @@ export default function ResetPassword() {
     if (password.length < 6) return toast.error('Password must be at least 6 characters')
     setLoading(true)
     try {
-      await axios.post(`/api/auth/reset-password/${token}`, { password })
+      await api.post(`/api/auth/reset-password/${token}`, { password })
       setDone(true)
       toast.success('Password reset successfully!')
       setTimeout(() => navigate('/login'), 2500)
