@@ -75,7 +75,6 @@ function recogniseShape(path) {
   const closeDist = Math.hypot(last.x-first.x, last.y-first.y)
   const isClosed = closeDist < diag * 0.30
 
-  // Straight line
   if (!isClosed) {
     const sd = Math.hypot(last.x-first.x, last.y-first.y)
     if (sd > 35) {
@@ -86,14 +85,12 @@ function recogniseShape(path) {
     return null
   }
 
-  // Circle / ellipse
   const cx = bbox.minX+W/2, cy = bbox.minY+H/2
   const avgR = pts.reduce((s,p) => s + Math.hypot(p.x-cx, p.y-cy), 0) / pts.length
   const radVar = Math.sqrt(pts.reduce((s,p) => { const d=Math.hypot(p.x-cx,p.y-cy)-avgR; return s+d*d }, 0) / pts.length) / avgR
   const asp = Math.min(W,H) / Math.max(W,H)
   if (radVar < 0.22 && asp > 0.55) return 'circle'
 
-  // Triangle configs
   const { minX, maxX, minY, maxY } = bbox
   const mx = minX+W/2, my = minY+H/2
   const triCfgs = [
@@ -131,6 +128,21 @@ function createPerfectShape(fab, path, type, color, width) {
   return null
 }
 
+// FIX #4: Simple throttle helper — no lodash needed
+function throttle(fn, ms) {
+  let last = 0, timer = null
+  return (...args) => {
+    const now = Date.now()
+    const remaining = ms - (now - last)
+    clearTimeout(timer)
+    if (remaining <= 0) {
+      last = now
+      fn(...args)
+    } else {
+      timer = setTimeout(() => { last = Date.now(); fn(...args) }, remaining)
+    }
+  }
+}
 
 const TOOLS = [
   { id:'draw',     label:'Draw',       icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
@@ -155,6 +167,8 @@ export default function Board() {
   const fabricModuleRef = useRef(null)
   const socketRef       = useRef(null)
   const isReceiving     = useRef(false)
+  // FIX #2: track whether DB canvas has finished loading before accepting socket updates
+  const dbLoadedRef     = useRef(false)
   const activeToolRef   = useRef('draw')
   const strokeColorRef  = useRef('#4ade80')
   const strokeWidthRef  = useRef(3)
@@ -181,9 +195,14 @@ export default function Board() {
 
   useEffect(() => {
     let canvas, cleanKeys, cleanResize
+    // FIX #6: isMounted guard — prevents setState / canvas ops after unmount
+    let isMounted = true
 
     const init = async () => {
       const fab = await import('fabric')
+      // FIX #6: bail out if unmounted before async import resolved
+      if (!isMounted) return
+
       fabricModuleRef.current = fab
       const { Canvas, PencilBrush } = fab
 
@@ -198,10 +217,12 @@ export default function Board() {
       brush.color = strokeColorRef.current; brush.width = strokeWidthRef.current
       canvas.freeDrawingBrush = brush; canvas.isDrawingMode = true
 
-      const emitCanvas = () => {
+      // FIX #4: Throttle canvas emissions to max once per 100ms
+      const emitCanvasRaw = () => {
         if (isReceiving.current) return
         socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(canvas.toJSON(['id'])) })
       }
+      const emitCanvas = throttle(emitCanvasRaw, 100)
 
       const onKey = (e) => {
         if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.matches('input,textarea')) {
@@ -212,23 +233,43 @@ export default function Board() {
       window.addEventListener('keydown', onKey)
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
+      // FIX #2 + #5: Load DB canvas first, mark done, THEN connect socket
       try {
         const res = await api.get(`/api/boards/${roomId}`, { withCredentials: true })
-        if (res.data.canvasJSON) { await canvas.loadFromJSON(JSON.parse(res.data.canvasJSON)); canvas.renderAll() }
+        if (!isMounted) return // FIX #6: check again after await
+        if (res.data.canvasJSON) {
+          // FIX #5: safe parse — handle both string and pre-parsed object
+          const raw = res.data.canvasJSON
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+          await canvas.loadFromJSON(parsed)
+          canvas.renderAll()
+        }
       } catch {}
 
+      if (!isMounted) return // FIX #6: check again after second await
+
+      // FIX #2: Only NOW connect socket — DB state is already on canvas
+      dbLoadedRef.current = true
       socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true })
       socketRef.current.emit('join-room', roomId)
+
       socketRef.current.on('canvas:draw', async (json) => {
+        // FIX #2: Ignore incoming updates until our DB canvas is rendered
+        if (!dbLoadedRef.current) return
         isReceiving.current = true
-        try { await canvas.loadFromJSON(JSON.parse(json)); canvas.renderAll() } catch (e) { console.error(e) }
+        try {
+          // FIX #5: safe parse for incoming socket data too
+          const parsed = typeof json === 'string' ? JSON.parse(json) : json
+          await canvas.loadFromJSON(parsed)
+          canvas.renderAll()
+        } catch (e) { console.error(e) }
         isReceiving.current = false
       })
+
       socketRef.current.on('canvas:clear', () => {
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
       })
 
-      // When a new user joins, the server asks us to send them our full canvas state
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
         const data = JSON.stringify(canvas.toJSON(['id']))
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
@@ -259,7 +300,16 @@ export default function Board() {
     }
 
     init()
-    return () => { cleanKeys?.(); cleanResize?.(); canvas?.dispose(); socketRef.current?.disconnect() }
+
+    return () => {
+      // FIX #6: set flag first so any in-flight awaits bail out cleanly
+      isMounted = false
+      dbLoadedRef.current = false
+      cleanKeys?.()
+      cleanResize?.()
+      canvas?.dispose()
+      socketRef.current?.disconnect()
+    }
   }, [roomId])
 
   const applyTool = (tool) => {
@@ -355,7 +405,6 @@ export default function Board() {
         padding: '0 1.2rem', borderBottom: `1px solid ${border}`,
         background: surface, zIndex: 50, flexShrink: 0,
       }}>
-        {/* Left: back + room info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button
             onClick={() => navigate('/dashboard')}
@@ -379,7 +428,6 @@ export default function Board() {
           <LogoWordmark size={26} />
         </div>
 
-        {/* Right: actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button onClick={saveBoard} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
@@ -425,7 +473,6 @@ export default function Board() {
               : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             }
           </button>
-          {/* User avatar */}
           <div title={user?.fullName || user?.name} style={{
             width: '32px', height: '32px', borderRadius: '50%',
             background: dark ? '#0d2a14' : '#dcfce7',
@@ -448,14 +495,11 @@ export default function Board() {
           display: 'flex', flexDirection: 'column',
           padding: '12px 10px', gap: '4px', overflowY: 'auto',
         }}>
-
-          {/* Tools section */}
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 6px 6px' }}>Tools</div>
           {TOOLS.map(t => <SideBtn key={t.id} tool={t} />)}
 
           <div style={{ height: '1px', background: border, margin: '10px 0' }} />
 
-          {/* Stroke color */}
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Color</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '0 4px' }}>
             {['#4ade80','#60a5fa','#f472b6','#fb923c','#facc15','#a78bfa','#f87171','#ffffff','#94a3b8'].map(c => (
@@ -469,7 +513,6 @@ export default function Board() {
                 onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
               />
             ))}
-            {/* color picker */}
             <label title="Custom color" style={{ width: '24px', height: '24px', borderRadius: '6px', border: `1px dashed ${borderBr}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: textMuted, fontSize: '14px', overflow: 'hidden' }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
               <input type="color" value={strokeColor} onChange={e => { setStrokeColor(e.target.value); strokeColorRef.current = e.target.value; updateBrush(e.target.value, strokeWidthRef.current) }}
@@ -479,7 +522,6 @@ export default function Board() {
 
           <div style={{ height: '1px', background: border, margin: '10px 0' }} />
 
-          {/* Stroke */}
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Size</div>
           <div style={{ display: 'flex', gap: '6px', padding: '0 4px' }}>
             {[2, 4, 8, 14].map(w => (
@@ -498,7 +540,6 @@ export default function Board() {
 
           <div style={{ height: '1px', background: border, margin: '10px 0' }} />
 
-          {/* Actions */}
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Actions</div>
           <button onClick={deleteSelected} style={{
             display: 'flex', alignItems: 'center', gap: '9px',

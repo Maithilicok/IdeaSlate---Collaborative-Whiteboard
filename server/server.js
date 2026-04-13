@@ -34,6 +34,12 @@ app.get('/', (req, res) => {
   res.send('IdeaSlate API is running!')
 })
 
+// FIX #3: Health endpoint — point UptimeRobot at /health every 5 min
+// to prevent Render free tier from spinning down and causing 30s cold starts
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now() })
+})
+
 initSocket(io)
 
 httpServer.listen(process.env.PORT, () => {

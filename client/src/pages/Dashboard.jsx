@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { LogoWordmark } from '../components/Logo'
-import axios from 'axios'
+// FIX #1: Use the configured api instance (has baseURL = VITE_API_URL), NOT raw axios
+import api from '../api/axios'
 import toast from 'react-hot-toast'
 
 const ThemeIcon = ({ theme }) => theme === 'dark'
   ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
   : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
 
-// board name
 function boardHue(name = '') {
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
@@ -22,13 +22,11 @@ function BoardPreview({ name }) {
   return (
     <svg viewBox="0 0 240 120" style={{ width: '100%' }} fill="none">
       <rect width="240" height="120" fill="var(--bg-tertiary)" />
-      {/* dot grid */}
       {Array.from({ length: 5 }, (_, r) =>
         Array.from({ length: 10 }, (_, c) => (
           <circle key={`${r}-${c}`} cx={c * 26 + 13} cy={r * 26 + 13} r="1.1" fill="var(--border)" />
         ))
       )}
-      {/* unique doodle per board */}
       <rect x="30" y="30" width="60" height="40" rx="3" stroke={`hsl(${hue},60%,60%)`} strokeWidth="1.8" />
       <circle cx="170" cy="55" r="28" stroke={`hsl(${(hue+120)%360},60%,60%)`} strokeWidth="1.8" />
       <line x1="100" y1="90" x2="200" y2="35" stroke={`hsl(${(hue+240)%360},60%,60%)`} strokeWidth="1.6" strokeLinecap="round" />
@@ -57,7 +55,6 @@ function Modal({ show, onClose, children }) {
   )
 }
 
-// ── Board card action menu (⋯ dropdown) ──────────────────
 function BoardMenu({ room, isOwner, onRename, onDelete, onCopyLink }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -139,7 +136,7 @@ export default function Dashboard() {
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
-  const [renameTarget, setRenameTarget] = useState(null) // { id, name }
+  const [renameTarget, setRenameTarget] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [search, setSearch] = useState('')
   const [showProfile, setShowProfile] = useState(false)
@@ -148,7 +145,8 @@ export default function Dashboard() {
 
   const fetchRooms = async () => {
     try {
-      const res = await axios.get('/api/rooms/my-rooms', { withCredentials: true })
+      // FIX #1: was `axios.get(...)` — now uses `api` which has the correct baseURL
+      const res = await api.get('/api/rooms/my-rooms', { withCredentials: true })
       setRooms(res.data)
     } catch { toast.error('Failed to load boards') }
     finally { setLoading(false) }
@@ -158,7 +156,8 @@ export default function Dashboard() {
     if (!roomName.trim()) return toast.error('Enter a board name')
     setCreating(true)
     try {
-      const res = await axios.post('/api/rooms/create', { name: roomName }, { withCredentials: true })
+      // FIX #1: was `axios.post(...)` — now uses `api`
+      const res = await api.post('/api/rooms/create', { name: roomName }, { withCredentials: true })
       setRooms(r => [...r, res.data]); setRoomName(''); setShowCreate(false)
       toast.success('Board created!'); navigate(`/board/${res.data._id}`)
     } catch { toast.error('Failed to create board') }
@@ -167,7 +166,8 @@ export default function Dashboard() {
 
   const deleteRoom = async (id) => {
     try {
-      await axios.delete(`/api/rooms/${id}`, { withCredentials: true })
+      // FIX #1: was `axios.delete(...)` — now uses `api`
+      await api.delete(`/api/rooms/${id}`, { withCredentials: true })
       setRooms(r => r.filter(b => b._id !== id)); setConfirmDeleteId(null)
       toast.success('Board deleted')
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to delete') }
@@ -177,7 +177,8 @@ export default function Dashboard() {
     if (!renameValue.trim()) return toast.error('Enter a board name')
     setRenaming(true)
     try {
-      await axios.patch(`/api/rooms/${renameTarget.id}`, { name: renameValue }, { withCredentials: true })
+      // FIX #1: was `axios.patch(...)` — now uses `api`
+      await api.patch(`/api/rooms/${renameTarget.id}`, { name: renameValue }, { withCredentials: true })
       setRooms(r => r.map(b => b._id === renameTarget.id ? { ...b, name: renameValue, updatedAt: new Date().toISOString() } : b))
       toast.success('Board renamed!'); setRenameTarget(null)
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to rename') }
@@ -197,7 +198,8 @@ export default function Dashboard() {
         const shareLink = trimmed.includes('/join/') ? trimmed.split('/join/').pop() : trimmed
         endpoint = `/api/rooms/join/${shareLink}`
       }
-      const res = await axios.post(endpoint, {}, { withCredentials: true })
+      // FIX #1: was `axios.post(...)` — now uses `api`
+      const res = await api.post(endpoint, {}, { withCredentials: true })
       setJoinInput(''); setShowJoin(false)
       toast.success('Joined board!'); navigate(`/board/${res.data._id}`)
     } catch { toast.error('Invalid or expired invite link') }
@@ -210,9 +212,13 @@ export default function Dashboard() {
     toast.success('Link copied!')
   }
 
-  const isOwner = (room) => room.owner === user?._id || room.owner?._id === user?._id
+  // FIX #7: ObjectIds are objects — === comparison always fails.
+  // Use .toString() on both sides for reliable comparison.
+  const isOwner = (room) => {
+    const ownerId = room.owner?._id?.toString() || room.owner?.toString()
+    return ownerId === user?._id?.toString()
+  }
 
-  // Support both `name` and `fullName` fields from different API shapes
   const displayName = user?.name || 'there'
   const avatarInitial = displayName.charAt(0).toUpperCase()
 
@@ -228,7 +234,6 @@ export default function Dashboard() {
         borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)',
         position: 'sticky', top: 0, zIndex: 100,
       }}>
-        {/* Left: back arrow + logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button
             onClick={() => navigate('/')}
@@ -245,12 +250,10 @@ export default function Dashboard() {
           <LogoWordmark size={28} />
         </div>
 
-        {/* Right: theme + avatar + logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button onClick={toggleTheme} className="btn btn-ghost" style={{ padding: '7px 11px' }}>
             <ThemeIcon theme={theme} />
           </button>
-          {/* Avatar — clickable to open profile panel */}
           <button
             onClick={() => setShowProfile(true)}
             title="View profile"
@@ -283,7 +286,6 @@ export default function Dashboard() {
       {/* ── Content ── */}
       <div style={{ padding: '2.5rem', maxWidth: '1120px', margin: '0 auto' }}>
 
-        {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1 style={{ fontSize: '1.9rem', fontWeight: '700', color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
@@ -295,7 +297,6 @@ export default function Dashboard() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Search */}
             {rooms.length > 3 && (
               <div style={{ position: 'relative' }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
@@ -324,14 +325,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── Boards grid ── */}
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-muted)', padding: '3rem 0' }}>
             <div style={{ width: '18px', height: '18px', border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
             Loading your boards…
           </div>
         ) : rooms.length === 0 ? (
-          /* ── Empty state ── */
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             padding: '5rem 2rem', textAlign: 'center', gap: '16px',
@@ -375,12 +374,10 @@ export default function Dashboard() {
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = 'var(--shadow-glow)' }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
               >
-                
                 <div onClick={() => navigate(`/board/${room._id}`)} style={{ cursor: 'pointer', overflow: 'hidden', borderBottom: '1px solid var(--border)' }}>
                   <BoardPreview name={room.name} />
                 </div>
 
-                {/* Info */}
                 <div style={{ padding: '14px 16px', flex: 1 }}>
                   <div onClick={() => navigate(`/board/${room._id}`)} style={{ cursor: 'pointer' }}>
                     <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>
@@ -392,7 +389,6 @@ export default function Dashboard() {
                         : `Created ${new Date(room.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`
                       }
                     </div>
-                    {/* Owner badge for shared/joined boards */}
                     {!isOwner(room) && (
                       <div style={{ marginTop: '5px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '2px 7px', borderRadius: '20px', border: '1px solid var(--border)' }}>
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
@@ -402,7 +398,6 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-               
                 <div style={{ padding: '0 16px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <button onClick={() => navigate(`/board/${room._id}`)} style={{
                     fontSize: '12px', padding: '5px 11px', borderRadius: '7px',
@@ -424,7 +419,6 @@ export default function Dashboard() {
               </div>
             ))}
 
-            {/* New board card */}
             <div onClick={() => setShowCreate(true)} style={{
               border: '2px dashed var(--border)', borderRadius: '14px',
               minHeight: '220px', display: 'flex',
@@ -525,9 +519,9 @@ export default function Dashboard() {
           <button onClick={() => deleteRoom(confirmDeleteId)} className="btn btn-danger" style={{ flex: 1 }}>Delete board</button>
         </div>
       </Modal>
-      
+
+      {/* ── Profile modal ── */}
       <Modal show={showProfile} onClose={() => setShowProfile(false)}>
-        {/* Avatar banner */}
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center',
           padding: '1.4rem 1rem 1.2rem', marginBottom: '1.2rem',
@@ -556,7 +550,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Stats row */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '1.2rem' }}>
           <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px 16px' }}>
             <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Boards</div>
@@ -573,7 +566,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Actions */}
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={() => setShowProfile(false)} className="btn btn-ghost" style={{ flex: 1 }}>Close</button>
           <button
@@ -594,7 +586,6 @@ export default function Dashboard() {
           </button>
         </div>
       </Modal>
-
 
     </div>
   )
