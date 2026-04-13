@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '../api/axios'
 import { Logo, LogoWordmark } from '../components/Logo'
 
 export default function Join() {
