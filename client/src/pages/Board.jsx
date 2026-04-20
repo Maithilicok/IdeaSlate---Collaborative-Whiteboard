@@ -250,7 +250,8 @@ export default function Board() {
 
       // FIX #2: Only NOW connect socket — DB state is already on canvas
       dbLoadedRef.current = true
-      socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true, transports: ['websocket'] })
+      const backendUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000'
+      socketRef.current = io(backendUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
       socketRef.current.on('connect', () => console.log('[SOCKET] connected:', socketRef.current.id))
       socketRef.current.on('connect_error', (e) => console.error('[SOCKET] error:', e.message))
       socketRef.current.emit('join-room', roomId)
@@ -266,18 +267,25 @@ export default function Board() {
         } catch (e) {
           console.error('canvas:draw error', e)
         } finally {
-          isReceiving.current = false
+          // Add brief safety delay to let internal Fabric events (like object:added) flush
+          setTimeout(() => { isReceiving.current = false }, 50)
         }
       })
 
       socketRef.current.on('canvas:clear', () => {
+        isReceiving.current = true
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
+        setTimeout(() => { isReceiving.current = false }, 50)
       })
 
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
         const data = JSON.stringify(canvas.toJSON(['id']))
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
       })
+
+      const safeEmit = () => {
+        if (!isReceiving.current) emitCanvas()
+      }
 
       canvas.on('object:added', (e) => {
         if (isReceiving.current) return
@@ -287,13 +295,13 @@ export default function Board() {
           const t = recogniseShape(obj)
           if (t) {
             const p = createPerfectShape(fabricModuleRef.current, obj, t, strokeColorRef.current, strokeWidthRef.current)
-            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); emitCanvas(); return }
+            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); safeEmit(); return }
           }
         }
-        emitCanvas()
+        safeEmit()
       })
-      canvas.on('object:modified', emitCanvas)
-      canvas.on('object:removed',  () => { if (!isReceiving.current) emitCanvas() })
+      canvas.on('object:modified', safeEmit)
+      canvas.on('object:removed',  safeEmit)
 
       const onResize = () => {
         canvas.setDimensions({ width: window.innerWidth-224, height: window.innerHeight-62 })
@@ -415,74 +423,65 @@ export default function Board() {
             title="Back to dashboard"
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '6px 11px', borderRadius: '8px',
+              padding: '4px 12px', borderRadius: '16px',
               border: `1px solid ${border}`, background: 'transparent',
-              color: textMuted, cursor: 'pointer', fontSize: '13px',
+              color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
               transition: 'all 0.15s',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textMuted }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textPrimary }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-              <path d="M19 12H5M12 5l-7 7 7 7"/>
-            </svg>
-            Dashboard
+            ← Back
           </button>
-          <div style={{ width: '1px', height: '20px', background: border }} />
-          <LogoWordmark size={26} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '4px' }}>
+            <div style={{ width: 22, height: 22, background: accent, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 'bold', fontSize: '14px' }}>I</div>
+            <span style={{ fontSize: 16, fontWeight: '700', color: textPrimary, fontFamily: "'DM Sans', sans-serif" }}>IdeaSlate</span>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button onClick={saveBoard} style={{
+          <button onClick={toggleTheme} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '6px 13px', borderRadius: '8px',
+            padding: '4px 12px', borderRadius: '16px',
             border: `1px solid ${border}`, background: 'transparent',
-            color: textMuted, cursor: 'pointer', fontSize: '13px',
+            color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
             transition: 'all 0.15s',
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textMuted }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textPrimary }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
-            </svg>
-            Save
+            {dark
+              ? <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg> Light</>
+              : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Dark</>
+            }
           </button>
           <button onClick={copyLink} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '6px 13px', borderRadius: '8px',
+            padding: '4px 12px', borderRadius: '16px',
             border: `1px solid ${border}`, background: 'transparent',
-            color: textMuted, cursor: 'pointer', fontSize: '13px',
+            color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
             transition: 'all 0.15s',
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textMuted }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textPrimary }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-            </svg>
             Share
           </button>
-          <button onClick={toggleTheme} style={{
-            padding: '6px 10px', borderRadius: '8px',
-            border: `1px solid ${border}`, background: 'transparent',
-            color: textMuted, cursor: 'pointer',
+          <button onClick={saveBoard} style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '4px 16px', borderRadius: '16px',
+            border: `1px solid ${accent}`, background: accent,
+            color: '#000', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
             transition: 'all 0.15s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.color = textMuted }}
-          >
-            {dark
-              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-              : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            }
+          }}>
+            Save
           </button>
           <div title={user?.fullName || user?.name} style={{
-            width: '32px', height: '32px', borderRadius: '50%',
-            background: dark ? '#0d2a14' : '#dcfce7',
-            border: `1.5px solid ${accent}`,
+            width: '28px', height: '28px', borderRadius: '50%',
+            background: 'transparent',
+            border: `1px solid ${accent}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: accent, fontWeight: '700', fontSize: '13px', userSelect: 'none',
+            color: accent, fontWeight: '700', fontSize: '12px', userSelect: 'none',
           }}>
             {(user?.fullName || user?.name || '?').charAt(0).toUpperCase()}
           </div>
@@ -502,79 +501,83 @@ export default function Board() {
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 6px 6px' }}>Tools</div>
           {TOOLS.map(t => <SideBtn key={t.id} tool={t} />)}
 
-          <div style={{ height: '1px', background: border, margin: '10px 0' }} />
+          {activeTool === 'smart' && (
+            <div style={{
+              margin: '4px 6px 0',
+              padding: '10px',
+              borderRadius: '8px',
+              background: dark ? '#0d2a14' : '#dcfce7',
+              border: `1px solid ${accent}`,
+              fontSize: '11px',
+              color: accent,
+              lineHeight: '1.4'
+            }}>
+              ✨ Draw a circle, rect or straight line — snaps to perfect shape
+            </div>
+          )}
+
+          <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
 
           <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Color</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '0 4px' }}>
-            {['#4ade80','#60a5fa','#f472b6','#fb923c','#facc15','#a78bfa','#f87171','#ffffff','#94a3b8'].map(c => (
-              <button key={c} onClick={() => { setStrokeColor(c); strokeColorRef.current = c; updateBrush(c, strokeWidthRef.current) }}
-                style={{
-                  width: '24px', height: '24px', borderRadius: '6px', background: c,
-                  border: strokeColor === c ? `2px solid ${textPrimary}` : '2px solid transparent',
-                  cursor: 'pointer', transition: 'transform 0.1s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.15)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
-              />
-            ))}
-            <label title="Custom color" style={{ width: '24px', height: '24px', borderRadius: '6px', border: `1px dashed ${borderBr}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: textMuted, fontSize: '14px', overflow: 'hidden' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          <div style={{ padding: '0 4px' }}>
+            <label style={{
+              width: '100%', height: '36px', borderRadius: '6px',
+              background: strokeColor, display: 'block', cursor: 'pointer',
+              border: `1px solid ${border}`
+            }}>
               <input type="color" value={strokeColor} onChange={e => { setStrokeColor(e.target.value); strokeColorRef.current = e.target.value; updateBrush(e.target.value, strokeWidthRef.current) }}
-                style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px' }} />
+                style={{ opacity: 0, width: '1px', height: '1px' }} />
             </label>
           </div>
 
-          <div style={{ height: '1px', background: border, margin: '10px 0' }} />
+          <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
 
-          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Size</div>
-          <div style={{ display: 'flex', gap: '6px', padding: '0 4px' }}>
-            {[2, 4, 8, 14].map(w => (
-              <button key={w} onClick={() => { setStrokeWidth(w); strokeWidthRef.current = w; updateBrush(strokeColorRef.current, w) }}
-                style={{
-                  flex: 1, height: '28px', borderRadius: '7px',
-                  border: strokeWidth === w ? `1.5px solid ${accent}` : `1px solid ${border}`,
-                  background: strokeWidth === w ? (dark ? '#0d2a14' : '#dcfce7') : 'transparent',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.15s',
-                }}>
-                <div style={{ borderRadius: '50%', background: strokeWidth === w ? accent : textMuted, width: `${Math.min(w + 2, 14)}px`, height: `${Math.min(w + 2, 14)}px` }} />
-              </button>
-            ))}
+          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Stroke: {strokeWidth}px</div>
+          <div style={{ padding: '0 4px', display: 'flex', alignItems: 'center', height: '24px' }}>
+            <input type="range" min="1" max="20" value={strokeWidth}
+              onChange={e => {
+                const w = Number(e.target.value)
+                setStrokeWidth(w)
+                strokeWidthRef.current = w
+                updateBrush(strokeColorRef.current, w)
+              }}
+              style={{ width: '100%', accentColor: accent, cursor: 'pointer' }} />
           </div>
 
-          <div style={{ height: '1px', background: border, margin: '10px 0' }} />
+          <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
 
-          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Actions</div>
-          <button onClick={deleteSelected} style={{
-            display: 'flex', alignItems: 'center', gap: '9px',
-            padding: '8px 11px', borderRadius: '9px', width: '100%',
-            border: `1px solid ${border}`, background: 'transparent',
-            color: textMuted, cursor: 'pointer', fontSize: '13px',
-            transition: 'all 0.15s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = dark ? '#2a0e0e' : '#fef2f2'; e.currentTarget.style.color = '#f87171'; e.currentTarget.style.borderColor = '#f87171' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = textMuted; e.currentTarget.style.borderColor = border }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-            </svg>
-            Delete selected
-          </button>
-          <button onClick={() => { if (window.confirm('Clear the entire canvas? This cannot be undone.')) clearCanvas() }} style={{
-            display: 'flex', alignItems: 'center', gap: '9px',
-            padding: '8px 11px', borderRadius: '9px', width: '100%',
-            border: `1px solid ${border}`, background: 'transparent',
-            color: textMuted, cursor: 'pointer', fontSize: '13px',
-            transition: 'all 0.15s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = dark ? '#2a0e0e' : '#fef2f2'; e.currentTarget.style.color = '#f87171'; e.currentTarget.style.borderColor = '#f87171' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = textMuted; e.currentTarget.style.borderColor = border }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
-            </svg>
-            Clear canvas
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <button onClick={deleteSelected} style={{
+              display: 'flex', alignItems: 'center', gap: '9px',
+              padding: '8px 11px', borderRadius: '9px', width: '100%',
+              border: `1px solid ${dark ? '#7f1d1d' : '#fca5a5'}`, background: 'transparent',
+              color: '#ef4444', cursor: 'pointer', fontSize: '13px',
+              transition: 'all 0.15s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = dark ? '#450a0a' : '#fee2e2' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+              Delete selected
+            </button>
+            <button onClick={() => { if (window.confirm('Clear the entire canvas? This cannot be undone.')) clearCanvas() }} style={{
+              display: 'flex', alignItems: 'center', gap: '9px',
+              padding: '8px 11px', borderRadius: '9px', width: '100%',
+              border: `1px solid ${dark ? '#7f1d1d' : '#fca5a5'}`, background: 'transparent',
+              color: '#ef4444', cursor: 'pointer', fontSize: '13px',
+              transition: 'all 0.15s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = dark ? '#450a0a' : '#fee2e2' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+              </svg>
+              Clear canvas
+            </button>
+          </div>
         </aside>
 
         {/* ── Canvas ── */}
