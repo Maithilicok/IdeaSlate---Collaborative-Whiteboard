@@ -15,14 +15,35 @@ connectDB()
 
 const app = express()
 const httpServer = createServer(app)
+// Parse CLIENT_URL safely, removing trailing slashes and splitting by comma
+const clientUrls = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map(url => url.trim().replace(/\/$/, ''))
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true)
+    
+    // ALlow local dev, exact matches from .env, or any Vercel preview/production links
+    if (
+      origin.includes('localhost') || 
+      origin.includes('127.0.0.1') || 
+      clientUrls.includes(origin) || 
+      origin.endsWith('.vercel.app')
+    ) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
+  credentials: true
+}
+
 const io = new Server(httpServer, {
-  cors: {
-    origin: process.env.CLIENT_URL,
-    credentials: true
-  }
+  cors: corsOptions
 })
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }))
+app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())
 
