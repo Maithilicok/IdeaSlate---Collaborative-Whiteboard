@@ -233,12 +233,30 @@ export default function Board() {
       window.addEventListener('keydown', onKey)
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
-      // FIX #2 + #5: Load DB canvas first, mark done, THEN connect socket
+      // Connect socket and join room immediately — but don't request peer state yet
+      socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true })
+      socketRef.current.emit('join-room', roomId)
+
+      // Helper: load a JSON canvas state safely, ignoring events fired during load
+      const applyCanvasJSON = async (json) => {
+        if (isReceiving.current) return
+        isReceiving.current = true
+        try {
+          const parsed = typeof json === 'string' ? JSON.parse(json) : json
+          await canvas.loadFromJSON(parsed)
+          canvas.renderAll()
+        } catch (e) {
+          console.error('canvas load error', e)
+        } finally {
+          isReceiving.current = false  // ALWAYS reset — even on error
+        }
+      }
+
+      // Load DB canvas, then signal readiness to the server
       try {
         const res = await api.get(`/api/boards/${roomId}`, { withCredentials: true })
-        if (!isMounted) return // FIX #6: check again after await
+        if (!isMounted) return
         if (res.data.canvasJSON) {
-          // FIX #5: safe parse — handle both string and pre-parsed object
           const raw = res.data.canvasJSON
           const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
           await canvas.loadFromJSON(parsed)
@@ -246,30 +264,29 @@ export default function Board() {
         }
       } catch {}
 
-      if (!isMounted) return // FIX #6: check again after second await
+      if (!isMounted) return
 
-      // FIX #2: Only NOW connect socket — DB state is already on canvas
+      // DB is loaded — mark ready and ask a peer for their live state
+      // (peer state wins if the room has been drawn on since last Save)
       dbLoadedRef.current = true
-      socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true })
-      socketRef.current.emit('join-room', roomId)
+      socketRef.current.emit('canvas:request-state', roomId)
 
-      socketRef.current.on('canvas:draw', async (json) => {
-        // FIX #2: Ignore incoming updates until our DB canvas is rendered
+      // Regular broadcast: another user drew something
+      socketRef.current.on('canvas:draw', (json) => {
         if (!dbLoadedRef.current) return
-        isReceiving.current = true
-        try {
-          // FIX #5: safe parse for incoming socket data too
-          const parsed = typeof json === 'string' ? JSON.parse(json) : json
-          await canvas.loadFromJSON(parsed)
-          canvas.renderAll()
-        } catch (e) { console.error(e) }
-        isReceiving.current = false
+        applyCanvasJSON(json)
+      })
+
+      // Peer full-state sync: arrives via dedicated event, never collides with canvas:draw
+      socketRef.current.on('canvas:state-from-peer', (json) => {
+        applyCanvasJSON(json)
       })
 
       socketRef.current.on('canvas:clear', () => {
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
       })
 
+      // An existing peer asked us to send our live canvas to a new joiner
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
         const data = JSON.stringify(canvas.toJSON(['id']))
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
