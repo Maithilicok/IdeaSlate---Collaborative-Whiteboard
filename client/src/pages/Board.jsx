@@ -217,29 +217,39 @@ export default function Board() {
       brush.color = strokeColorRef.current; brush.width = strokeWidthRef.current
       canvas.freeDrawingBrush = brush; canvas.isDrawingMode = true
 
-      // FIX #4: Throttle canvas emissions to max once per 100ms
-      const emitCanvasRaw = () => {
-        if (isReceiving.current) return
-        socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(canvas.toJSON(['id'])) })
+      // Emit a single object to peers (add or modify)
+      const emitObject = (obj) => {
+        if (isReceiving.current || !socketRef.current) return
+        socketRef.current.emit('canvas:object:added', {
+          roomId,
+          data: JSON.stringify(obj.toJSON(['id']))
+        })
       }
-      const emitCanvas = throttle(emitCanvasRaw, 100)
+
+      // Emit a removal to peers by object id
+      const emitRemove = (id) => {
+        if (isReceiving.current || !socketRef.current) return
+        socketRef.current.emit('canvas:object:removed', { roomId, id })
+      }
 
       const onKey = (e) => {
         if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.matches('input,textarea')) {
           const a = canvas.getActiveObject()
-          if (a) { canvas.remove(a); canvas.renderAll(); emitCanvas() }
+          if (a) { canvas.remove(a); canvas.renderAll() }
         }
       }
       window.addEventListener('keydown', onKey)
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
-      // Connect socket and join room immediately — but don't request peer state yet
-      socketRef.current = io(import.meta.env.VITE_API_URL, { withCredentials: true })
+      // Connect socket and join room immediately
+      socketRef.current = io(import.meta.env.VITE_API_URL, { 
+  withCredentials: true,
+  transports: ['websocket']
+})
       socketRef.current.emit('join-room', roomId)
 
-      // Helper: load a JSON canvas state safely, ignoring events fired during load
-      const applyCanvasJSON = async (json) => {
-        if (isReceiving.current) return
+      // Full canvas replacement — only used for initial peer sync on join
+      const applyFullCanvas = async (json) => {
         isReceiving.current = true
         try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
@@ -248,11 +258,11 @@ export default function Board() {
         } catch (e) {
           console.error('canvas load error', e)
         } finally {
-          isReceiving.current = false  // ALWAYS reset — even on error
+          isReceiving.current = false
         }
       }
 
-      // Load DB canvas, then signal readiness to the server
+      // Load DB canvas
       try {
         const res = await api.get(`/api/boards/${roomId}`, { withCredentials: true })
         if (!isMounted) return
@@ -266,32 +276,60 @@ export default function Board() {
 
       if (!isMounted) return
 
-      // DB is loaded — mark ready and ask a peer for their live state
-      // (peer state wins if the room has been drawn on since last Save)
+      // DB loaded — ask a peer for any unsaved live strokes
       dbLoadedRef.current = true
       socketRef.current.emit('canvas:request-state', roomId)
 
-      // Regular broadcast: another user drew something
-      socketRef.current.on('canvas:draw', (json) => {
-        if (!dbLoadedRef.current) return
-        applyCanvasJSON(json)
+      // ── Incoming events ───────────────────────────────────────────────────
+
+      // A peer added or modified a single object — surgically add/update it
+      socketRef.current.on('canvas:object:added', async ({ data }) => {
+        isReceiving.current = true
+        try {
+          const parsed = typeof data === 'string' ? JSON.parse(data) : data
+          const existing = canvas.getObjects().find(o => o.id === parsed.id)
+          if (existing) {
+            existing.set(parsed)
+            existing.setCoords()
+            canvas.renderAll()
+          } else {
+            // fabric v6: util.enlivenObjects returns a promise
+            const { util } = fabricModuleRef.current
+            const enlivened = await util.enlivenObjects([parsed])
+            const obj = enlivened[0]
+            if (obj) {
+              obj.id = parsed.id
+              canvas.add(obj)
+              canvas.renderAll()
+            }
+          }
+        } catch (e) {
+          console.error('object sync error', e)
+        } finally {
+          isReceiving.current = false
+        }
       })
 
-      // Peer full-state sync: arrives via dedicated event, never collides with canvas:draw
-      socketRef.current.on('canvas:state-from-peer', (json) => {
-        applyCanvasJSON(json)
+      // A peer removed an object — remove it by id
+      socketRef.current.on('canvas:object:removed', ({ id }) => {
+        const obj = canvas.getObjects().find(o => o.id === id)
+        if (obj) { isReceiving.current = true; canvas.remove(obj); canvas.renderAll(); isReceiving.current = false }
       })
+
+      // Full canvas from peer — new joiner initial sync only
+      socketRef.current.on('canvas:state-from-peer', applyFullCanvas)
 
       socketRef.current.on('canvas:clear', () => {
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
       })
 
-      // An existing peer asked us to send our live canvas to a new joiner
+      // An existing peer asked us to send our full canvas to the new joiner
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
         const data = JSON.stringify(canvas.toJSON(['id']))
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
       })
 
+      // ── Local events → emit to peers ──────────────────────────────────────
       canvas.on('object:added', (e) => {
         if (isReceiving.current) return
         const obj = e.target
@@ -300,13 +338,13 @@ export default function Board() {
           const t = recogniseShape(obj)
           if (t) {
             const p = createPerfectShape(fabricModuleRef.current, obj, t, strokeColorRef.current, strokeWidthRef.current)
-            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); emitCanvas(); return }
+            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); emitObject(p); return }
           }
         }
-        emitCanvas()
+        emitObject(obj)
       })
-      canvas.on('object:modified', emitCanvas)
-      canvas.on('object:removed',  () => { if (!isReceiving.current) emitCanvas() })
+      canvas.on('object:modified', (e) => { if (!isReceiving.current) emitObject(e.target) })
+      canvas.on('object:removed',  (e) => { if (!isReceiving.current && e.target?.id) emitRemove(e.target.id) })
 
       const onResize = () => {
         canvas.setDimensions({ width: window.innerWidth-224, height: window.innerHeight-62 })
@@ -372,8 +410,9 @@ export default function Board() {
     if (!fabricRef.current) return
     const a = fabricRef.current.getActiveObject()
     if (!a) return toast.error('Select an element first')
+    const id = a.id
     fabricRef.current.remove(a); fabricRef.current.renderAll()
-    socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(fabricRef.current.toJSON(['id'])) })
+    if (id) socketRef.current?.emit('canvas:object:removed', { roomId, id })
     toast.success('Deleted!')
   }
 
