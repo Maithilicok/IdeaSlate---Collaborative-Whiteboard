@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { Logo, LogoWordmark } from '../components/Logo'
 import { io } from 'socket.io-client'
 import api from '../api/axios'
@@ -235,7 +235,7 @@ export default function Board() {
 
       // FIX #2 + #5: Load DB canvas first, mark done, THEN connect socket
       try {
-        const res = await api.get(`/api/boards/${roomId}`, { withCredentials: true })
+        const res = await api.get(`/boards/${roomId}`, { withCredentials: true })
         if (!isMounted) return // FIX #6: check again after await
         if (res.data.canvasJSON) {
           // FIX #5: safe parse — handle both string and pre-parsed object
@@ -380,7 +380,7 @@ export default function Board() {
 
   const saveBoard = async () => {
     try {
-      await api.put(`/api/boards/${roomId}`, { canvasJSON: JSON.stringify(fabricRef.current.toJSON(['id'])) }, { withCredentials: true })
+      await api.put(`/boards/${roomId}`, { canvasJSON: JSON.stringify(fabricRef.current.toJSON(['id'])) }, { withCredentials: true })
       toast.success('Board saved!')
     } catch { toast.error('Failed to save') }
   }

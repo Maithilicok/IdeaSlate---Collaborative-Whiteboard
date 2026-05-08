@@ -17,7 +17,7 @@ export default function Register() {
     if (password.length < 6) return toast.error('Password must be at least 6 characters')
     setLoading(true)
     try {
-const res = await api.post('/api/auth/register', { fullName, email, password })
+const res = await api.post('/auth/register', { fullName, email, password })
       toast.success('Check your email for the verification code!')
       navigate('/verify-email', { state: { email: res.data.email } })
     } catch (err) {

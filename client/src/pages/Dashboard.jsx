@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useTheme } from '../context/ThemeContext'
 import { LogoWordmark } from '../components/Logo'
 // FIX #1: Use the configured api instance (has baseURL = VITE_API_URL), NOT raw axios
@@ -146,7 +146,7 @@ export default function Dashboard() {
   const fetchRooms = async () => {
     try {
       // FIX #1: was `axios.get(...)` — now uses `api` which has the correct baseURL
-      const res = await api.get('/api/rooms/my-rooms', { withCredentials: true })
+      const res = await api.get('/rooms/my-rooms', { withCredentials: true })
       setRooms(res.data)
     } catch { toast.error('Failed to load boards') }
     finally { setLoading(false) }
@@ -157,7 +157,7 @@ export default function Dashboard() {
     setCreating(true)
     try {
       // FIX #1: was `axios.post(...)` — now uses `api`
-      const res = await api.post('/api/rooms/create', { name: roomName }, { withCredentials: true })
+      const res = await api.post('/rooms/create', { name: roomName }, { withCredentials: true })
       setRooms(r => [...r, res.data]); setRoomName(''); setShowCreate(false)
       toast.success('Board created!'); navigate(`/board/${res.data._id}`)
     } catch { toast.error('Failed to create board') }
@@ -167,7 +167,7 @@ export default function Dashboard() {
   const deleteRoom = async (id) => {
     try {
       // FIX #1: was `axios.delete(...)` — now uses `api`
-      await api.delete(`/api/rooms/${id}`, { withCredentials: true })
+      await api.delete(`/rooms/${id}`, { withCredentials: true })
       setRooms(r => r.filter(b => b._id !== id)); setConfirmDeleteId(null)
       toast.success('Board deleted')
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to delete') }
@@ -178,7 +178,7 @@ export default function Dashboard() {
     setRenaming(true)
     try {
       // FIX #1: was `axios.patch(...)` — now uses `api`
-      await api.patch(`/api/rooms/${renameTarget.id}`, { name: renameValue }, { withCredentials: true })
+      await api.patch(`/rooms/${renameTarget.id}`, { name: renameValue }, { withCredentials: true })
       setRooms(r => r.map(b => b._id === renameTarget.id ? { ...b, name: renameValue, updatedAt: new Date().toISOString() } : b))
       toast.success('Board renamed!'); setRenameTarget(null)
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to rename') }
@@ -193,10 +193,10 @@ export default function Dashboard() {
       let endpoint
       if (trimmed.includes('/board/')) {
         const roomId = trimmed.split('/board/').pop().split('/')[0]
-        endpoint = `/api/rooms/join-by-id/${roomId}`
+        endpoint = `/rooms/join-by-id/${roomId}`
       } else {
         const shareLink = trimmed.includes('/join/') ? trimmed.split('/join/').pop() : trimmed
-        endpoint = `/api/rooms/join/${shareLink}`
+        endpoint = `/rooms/join/${shareLink}`
       }
       // FIX #1: was `axios.post(...)` — now uses `api`
       const res = await api.post(endpoint, {}, { withCredentials: true })

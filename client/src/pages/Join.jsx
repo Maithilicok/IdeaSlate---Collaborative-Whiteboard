@@ -12,7 +12,7 @@ export default function Join() {
   useEffect(() => {
     const join = async () => {
       try {
-        const res = await api.post(`/api/rooms/join/${shareLink}`, {}, { withCredentials: true })
+        const res = await api.post(`/rooms/join/${shareLink}`, {}, { withCredentials: true })
         navigate(`/board/${res.data._id}`, { replace: true })
       } catch {
         setStatus('This invite link is invalid or has expired.')

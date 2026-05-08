@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useAuth } from './context/AuthContext'
+import { useAuth } from './context/useAuth'
 import { Logo } from './components/Logo'
 import Landing from './pages/Landing'
 import Login from './pages/Login'

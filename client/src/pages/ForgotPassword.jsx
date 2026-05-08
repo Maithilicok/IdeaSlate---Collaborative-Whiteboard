@@ -13,7 +13,7 @@ export default function ForgotPassword() {
     e.preventDefault()
     setLoading(true)
     try {
-      await api.post('/api/auth/forgot-password', { email })
+      await api.post('/auth/forgot-password', { email })
       setSent(true)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Something went wrong')
