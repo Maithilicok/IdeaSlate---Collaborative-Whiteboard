@@ -19,7 +19,7 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (!email) navigate('/register')
-  }, [email])
+  }, [email, navigate])
 
   useEffect(() => {
     if (countdown === 0) return

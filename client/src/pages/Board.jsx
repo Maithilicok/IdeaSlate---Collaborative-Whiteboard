@@ -176,13 +176,11 @@ export default function Board() {
   const [activeTool,  setActiveTool]  = useState('draw')
   const [strokeColor, setStrokeColor] = useState('#4ade80')
   const [strokeWidth, setStrokeWidth] = useState(3)
-  const [showProfile, setShowProfile] = useState(false)
 
   const dark        = theme === 'dark'
   const bg          = dark ? '#080e08' : '#f4fbf4'
   const surface     = dark ? '#0d180d' : '#eaf6ea'
   const border      = dark ? '#1a341a' : '#c2ddc2'
-  const borderBr    = dark ? '#2a5a2a' : '#8aba8a'
   const textPrimary = dark ? '#deeede' : '#0a180a'
   const textMuted   = dark ? '#527a52' : '#4a7a4a'
   const accent      = '#4ade80'
@@ -191,7 +189,7 @@ export default function Board() {
     if (!fabricRef.current) return
     fabricRef.current.backgroundColor = bg
     fabricRef.current.renderAll()
-  }, [theme])
+  }, [theme, bg])
 
   useEffect(() => {
     let canvas, cleanKeys, cleanResize
@@ -244,14 +242,17 @@ export default function Board() {
           await canvas.loadFromJSON(parsed)
           canvas.renderAll()
         }
-      } catch {}
+      } catch {
+        // ignore load errors (will start with blank canvas)
+      }
 
       if (!isMounted) return // FIX #6: check again after second await
 
       // FIX #2: Only NOW connect socket — DB state is already on canvas
       dbLoadedRef.current = true
       const backendUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000'
-      socketRef.current = io(backendUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
+      const socketUrl = backendUrl.replace(/\/api$/, '')
+      socketRef.current = io(socketUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
       socketRef.current.on('connect', () => console.log('[SOCKET] connected:', socketRef.current.id))
       socketRef.current.on('connect_error', (e) => console.error('[SOCKET] error:', e.message))
       socketRef.current.emit('join-room', roomId)
@@ -322,6 +323,7 @@ export default function Board() {
       canvas?.dispose()
       socketRef.current?.disconnect()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 
   const applyTool = (tool) => {

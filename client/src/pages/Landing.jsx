@@ -66,7 +66,7 @@ const features = [
 
 export default function Landing() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const { theme, toggleTheme } = useTheme()
 
   return (
