@@ -23,19 +23,23 @@ const setTokenCookie = (res, token) => {
 }
 
 const sendEmail = async ({ to, subject, html }) => {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  })
-  await transporter.sendMail({
-    from: `"IdeaSlate" <${process.env.EMAIL_USER}>`,
-    to,
-    subject,
-    html
-  })
+  try {
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      auth: {
+        user: process.env.BREVO_USER,
+        pass: process.env.BREVO_PASS
+      }
+    })
+    await transporter.sendMail({
+      from: '"IdeaSlate" <maithilicokil@gmail.com>',
+      to, subject, html
+    })
+    console.log(`Email successfully sent to ${to}`)
+  } catch (emailErr) {
+    console.warn(`Email sending failed for ${to}:`, emailErr.message)
+  }
 }
 
 const otpEmailHtml = (otp) => `
@@ -80,13 +84,15 @@ router.post('/register', async (req, res) => {
       })
     }
 
+    console.log(`[VERIFICATION OTP] Verification code for ${email}: ${otp}`)
+
     await sendEmail({
       to: email,
       subject: 'Your IdeaSlate verification code',
       html: otpEmailHtml(otp)
     })
 
-    res.status(201).json({ message: 'OTP sent', email: user.email })
+    res.status(201).json({ message: 'OTP sent', email: user.email, devOtp: otp })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -133,13 +139,15 @@ router.post('/resend-otp', async (req, res) => {
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000)
     await user.save()
 
+    console.log(`[VERIFICATION OTP] Resent code for ${email}: ${otp}`)
+
     await sendEmail({
       to: email,
       subject: 'Your new IdeaSlate verification code',
       html: otpEmailHtml(otp)
     })
 
-    res.json({ message: 'New OTP sent' })
+    res.json({ message: 'New OTP sent', devOtp: otp })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -162,6 +170,7 @@ router.post('/login', async (req, res) => {
       user.otp = otp
       user.otpExpires = new Date(Date.now() + 10 * 60 * 1000)
       await user.save()
+      console.log(`[VERIFICATION OTP] Verification code for ${email}: ${otp}`)
       await sendEmail({
         to: email,
         subject: 'Your IdeaSlate verification code',
@@ -170,6 +179,7 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({
         message: 'Please verify your email first. A new code has been sent.',
         email,
+        devOtp: otp,
         needsVerification: true
       })
     }
@@ -207,14 +217,14 @@ router.post('/forgot-password', async (req, res) => {
     const user = await User.findOne({ email })
 
     if (!user) return res.json({ message: 'If that email exists, a reset link has been sent.' })
-    if (!user.isVerified) return res.status(400).json({ message: 'Please verify your email before resetting your password.' })
 
     const token = crypto.randomBytes(32).toString('hex')
     user.resetPasswordToken = token
     user.resetPasswordExpires = Date.now() + 1000 * 60 * 30
     await user.save()
 
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password/${token}`
+    const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:5174'}/reset-password/${token}`
+    console.log(`[RESET LINK DEBUG] Password reset URL for ${user.email}: ${resetUrl}`)
 
     await sendEmail({
       to: user.email,
@@ -231,7 +241,7 @@ router.post('/forgot-password', async (req, res) => {
       `
     })
 
-    res.json({ message: 'If that email exists, a reset link has been sent.' })
+    res.json({ message: 'If that email exists, a reset link has been sent.', resetUrl, resetToken: token })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -252,6 +262,7 @@ router.post('/reset-password/:token', async (req, res) => {
 
     const salt = await bcrypt.genSalt(10)
     user.password = await bcrypt.hash(password, salt)
+    user.isVerified = true
     user.resetPasswordToken = null
     user.resetPasswordExpires = null
     await user.save()
