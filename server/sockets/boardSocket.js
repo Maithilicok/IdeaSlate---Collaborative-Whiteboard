@@ -1,10 +1,11 @@
 export const initSocket = (io) => {
   io.on('connection', (socket) => {
-    console.log('User connected:', socket.id)
+    console.log('[SOCKET] User connected:', socket.id)
 
-    socket.on('join-room', (roomId) => {
+    socket.on('join-room', (rawRoomId) => {
+      const roomId = typeof rawRoomId === 'object' ? (rawRoomId?.roomId || rawRoomId?.id) : String(rawRoomId)
       socket.join(roomId)
-      console.log(`User ${socket.id} joined room ${roomId}`)
+      console.log(`[SOCKET] User ${socket.id} joined room: "${roomId}"`)
 
       // Ask an existing member to push full canvas to the new joiner
       const roomSockets = io.sockets.adapter.rooms.get(roomId)
@@ -20,38 +21,48 @@ export const initSocket = (io) => {
 
     // Existing member sends full canvas directly to new joiner
     socket.on('canvas:full:sync:to', ({ targetSocketId, data }) => {
-      io.to(targetSocketId).emit('canvas:draw', data)
+      if (targetSocketId && data) {
+        io.to(targetSocketId).emit('canvas:draw', data)
+      }
     })
 
     // Full canvas broadcast (join sync, delete, clear)
-    socket.on('canvas:draw', ({ roomId, data }) => {
+    socket.on('canvas:draw', (payload) => {
+      const roomId = String(payload?.roomId || payload)
+      const data = payload?.data !== undefined ? payload.data : payload
       socket.to(roomId).emit('canvas:draw', data)
     })
 
     // Delta object sync (add / modify single object)
-    socket.on('canvas:object', ({ roomId, data }) => {
+    socket.on('canvas:object', (payload) => {
+      const roomId = String(payload?.roomId || payload)
+      const data = payload?.data !== undefined ? payload.data : payload
       socket.to(roomId).emit('canvas:object', { data })
     })
 
     // Live pointer streaming — broadcast to everyone else in room instantly
-    socket.on('canvas:pointer:start', ({ roomId, id, color, width, x, y }) => {
-      socket.to(roomId).emit('canvas:pointer:start', { id, color, width, x, y })
+    socket.on('canvas:pointer:start', (payload) => {
+      const roomId = String(payload?.roomId || payload)
+      socket.to(roomId).emit('canvas:pointer:start', payload)
     })
 
-    socket.on('canvas:pointer:move', ({ roomId, id, x, y }) => {
-      socket.to(roomId).emit('canvas:pointer:move', { id, x, y })
+    socket.on('canvas:pointer:move', (payload) => {
+      const roomId = String(payload?.roomId || payload)
+      socket.to(roomId).emit('canvas:pointer:move', payload)
     })
 
-    socket.on('canvas:pointer:end', ({ roomId, id }) => {
-      socket.to(roomId).emit('canvas:pointer:end', { id })
+    socket.on('canvas:pointer:end', (payload) => {
+      const roomId = String(payload?.roomId || payload)
+      socket.to(roomId).emit('canvas:pointer:end', payload)
     })
 
-    socket.on('canvas:clear', (roomId) => {
+    socket.on('canvas:clear', (payload) => {
+      const roomId = String(payload?.roomId || payload)
       socket.to(roomId).emit('canvas:clear')
     })
 
     socket.on('disconnect', () => {
-      console.log('User disconnected:', socket.id)
+      console.log('[SOCKET] User disconnected:', socket.id)
     })
   })
 }

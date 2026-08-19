@@ -265,16 +265,11 @@ export default function Board() {
       canvas.freeDrawingBrush = brush; canvas.isDrawingMode = true
 
       const emitFullCanvas = () => {
-        if (isReceiving.current) return
-        socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(canvas.toJSON(['id'])) })
+        if (isReceiving.current || !socketRef.current) return
+        const canvasData = JSON.stringify(canvas.toJSON(['id']))
+        socketRef.current.emit('canvas:draw', { roomId, data: canvasData })
       }
       const emitCanvas = emitFullCanvas
-
-      const emitObject = (obj) => {
-        if (isReceiving.current || !obj) return
-        const d = obj.toObject(['id'])
-        socketRef.current?.emit('canvas:object', { roomId, data: d })
-      }
 
       const onKey = (e) => {
         if (e.target.matches('input,textarea')) return
@@ -302,7 +297,7 @@ export default function Board() {
           canvas.renderAll()
         }
       } catch {} finally {
-        setTimeout(() => { isReceiving.current = false }, 100)
+        isReceiving.current = false
       }
 
       if (!isMounted) return
@@ -317,15 +312,19 @@ export default function Board() {
         withCredentials: true,
         transports: ['polling', 'websocket'],
         reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000
+        reconnectionAttempts: 20,
+        reconnectionDelay: 500
       })
-      socketRef.current.on('connect', () => console.log('[SOCKET] connected successfully:', socketRef.current.id))
-      socketRef.current.on('connect_error', (e) => console.error('[SOCKET] connection error:', e.message))
-      socketRef.current.emit('join-room', roomId)
+
+      socketRef.current.on('connect', () => {
+        console.log('[SOCKET] Connected to room:', roomId)
+        socketRef.current.emit('join-room', roomId)
+      })
+
+      socketRef.current.on('connect_error', (e) => console.error('[SOCKET] Connection error:', e.message))
 
       socketRef.current.on('canvas:draw', async (json) => {
-        if (!dbLoadedRef.current || isReceiving.current) return
+        if (isReceiving.current) return
         isReceiving.current = true
         try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
@@ -334,47 +333,43 @@ export default function Board() {
         } catch (e) {
           console.error('canvas:draw error', e)
         } finally {
-          setTimeout(() => { isReceiving.current = false }, 100)
+          isReceiving.current = false
         }
       })
 
-      socketRef.current.on('canvas:object', async ({ data }) => {
-        if (!dbLoadedRef.current || isReceiving.current) return
+      socketRef.current.on('canvas:object', async (payload) => {
+        if (isReceiving.current) return
         isReceiving.current = true
         try {
+          const data = payload?.data || payload
           const { util } = fabricModuleRef.current
-          const existing = canvas.getObjects().find(o => o.id === data.id)
-          if (existing) canvas.remove(existing)
-          const objs = await util.enlivenObjects([data])
-          if (objs[0]) {
-            objs[0].id = data.id
-            canvas.add(objs[0])
-            canvas.renderAll()
+          if (data && data.id) {
+            const existing = canvas.getObjects().find(o => o.id === data.id)
+            if (existing) canvas.remove(existing)
+            const objs = await util.enlivenObjects([data])
+            if (objs[0]) {
+              objs[0].id = data.id
+              canvas.add(objs[0])
+              canvas.renderAll()
+            }
           }
         } catch (e) {
           console.error('canvas:object error', e)
         } finally {
-          setTimeout(() => { isReceiving.current = false }, 50)
+          isReceiving.current = false
         }
       })
 
       socketRef.current.on('canvas:clear', () => {
         isReceiving.current = true
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
-        setTimeout(() => { isReceiving.current = false }, 100)
+        isReceiving.current = false
       })
 
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
         const data = JSON.stringify(canvas.toJSON(['id']))
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
       })
-
-      const safeEmitObject = (obj) => {
-        if (!isReceiving.current && obj) {
-          emitObject(obj)
-          emitFullCanvas()
-        }
-      }
 
       const handleNewObject = (obj) => {
         if (isReceiving.current || !obj) return
@@ -387,13 +382,13 @@ export default function Board() {
               canvas.remove(obj)
               canvas.add(p)
               canvas.renderAll()
-              safeEmitObject(p)
+              emitFullCanvas()
               saveUndoState()
               return
             }
           }
         }
-        safeEmitObject(obj)
+        emitFullCanvas()
         saveUndoState()
       }
 
@@ -403,7 +398,7 @@ export default function Board() {
           handleNewObject(e.target)
         }
       })
-      canvas.on('object:modified', (e) => { safeEmitObject(e.target); saveUndoState() })
+      canvas.on('object:modified', (e) => { emitFullCanvas(); saveUndoState() })
       canvas.on('object:removed',  () => { emitFullCanvas(); saveUndoState() })
 
       // SWEEP & CLICK OBJECT ERASER DISPATCHER
