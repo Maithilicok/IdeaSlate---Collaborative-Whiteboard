@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import nodemailer from 'nodemailer'
+import mongoose from 'mongoose'
 import User from '../models/User.js'
 import { protect } from '../middleware/authMiddleware.js'
 
@@ -10,8 +11,21 @@ const router = express.Router()
 
 // Helpers 
 
+const JWT_SECRET = process.env.JWT_SECRET || 'ideaslate_super_secret_key_2024'
+
+const checkDbConnection = (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      message: 'Database connection error. Please check MONGO_URI on Render environment variables and ensure 0.0.0.0/0 is allowed in MongoDB Atlas Network Access.'
+    })
+  }
+  next()
+}
+
+router.use(checkDbConnection)
+
 const generateToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' })
+  jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' })
 
 const setTokenCookie = (res, token) => {
   res.cookie('token', token, {
@@ -24,6 +38,10 @@ const setTokenCookie = (res, token) => {
 
 const sendEmail = async ({ to, subject, html }) => {
   try {
+    if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
+      console.warn('[EMAIL WARNING] BREVO_USER or BREVO_PASS missing in environment variables. Email sending skipped.')
+      return
+    }
     const transporter = nodemailer.createTransport({
       host: 'smtp-relay.brevo.com',
       port: 587,
