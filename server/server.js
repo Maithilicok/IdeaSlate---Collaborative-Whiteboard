@@ -40,7 +40,9 @@ const corsOptions = {
 }
 
 const io = new Server(httpServer, {
-  cors: corsOptions
+  cors: corsOptions,
+  transports: ['polling', 'websocket'],
+  allowEIO3: true
 })
 
 app.use(cors(corsOptions))

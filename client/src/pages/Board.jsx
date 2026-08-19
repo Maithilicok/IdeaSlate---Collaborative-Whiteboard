@@ -292,6 +292,7 @@ export default function Board() {
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
       try {
+        isReceiving.current = true
         const res = await api.get(`/boards/${roomId}`, { withCredentials: true })
         if (!isMounted) return
         if (res.data.canvasJSON) {
@@ -300,7 +301,9 @@ export default function Board() {
           await canvas.loadFromJSON(parsed)
           canvas.renderAll()
         }
-      } catch {}
+      } catch {} finally {
+        setTimeout(() => { isReceiving.current = false }, 100)
+      }
 
       if (!isMounted) return
 
@@ -310,9 +313,15 @@ export default function Board() {
           ? 'http://127.0.0.1:5000'
           : 'https://ideaslate-server.onrender.com'
       )
-      socketRef.current = io(backendUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
-      socketRef.current.on('connect', () => console.log('[SOCKET] connected:', socketRef.current.id))
-      socketRef.current.on('connect_error', (e) => console.error('[SOCKET] error:', e.message))
+      socketRef.current = io(backendUrl, {
+        withCredentials: true,
+        transports: ['polling', 'websocket'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
+      })
+      socketRef.current.on('connect', () => console.log('[SOCKET] connected successfully:', socketRef.current.id))
+      socketRef.current.on('connect_error', (e) => console.error('[SOCKET] connection error:', e.message))
       socketRef.current.emit('join-room', roomId)
 
       socketRef.current.on('canvas:draw', async (json) => {
@@ -325,7 +334,7 @@ export default function Board() {
         } catch (e) {
           console.error('canvas:draw error', e)
         } finally {
-          setTimeout(() => { isReceiving.current = false }, 50)
+          setTimeout(() => { isReceiving.current = false }, 100)
         }
       })
 
@@ -345,14 +354,14 @@ export default function Board() {
         } catch (e) {
           console.error('canvas:object error', e)
         } finally {
-          setTimeout(() => { isReceiving.current = false }, 30)
+          setTimeout(() => { isReceiving.current = false }, 50)
         }
       })
 
       socketRef.current.on('canvas:clear', () => {
         isReceiving.current = true
         canvas.clear(); canvas.backgroundColor = bg; canvas.renderAll()
-        setTimeout(() => { isReceiving.current = false }, 50)
+        setTimeout(() => { isReceiving.current = false }, 100)
       })
 
       socketRef.current.on('send-canvas-to', (targetSocketId) => {
