@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard'
 import Board from './pages/Board'
 import Join from './pages/Join'
 import { Toaster } from 'react-hot-toast'
+import PageTransition from './components/PageTransition'
 
 function LoadingScreen() {
   return (
@@ -68,15 +69,15 @@ export default function App() {
         }}
       />
       <Routes>
-        <Route path="/"                      element={<Landing />} />
-        <Route path="/login"                 element={<PublicRoute><Login /></PublicRoute>} />
-        <Route path="/register"              element={<PublicRoute><Register /></PublicRoute>} />
-        <Route path="/verify-email"          element={<VerifyEmail />} />
-        <Route path="/forgot-password"       element={<PublicRoute><ForgotPassword /></PublicRoute>} />
-        <Route path="/reset-password/:token" element={<PublicRoute><ResetPassword /></PublicRoute>} />
-        <Route path="/dashboard"             element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-        <Route path="/board/:roomId"         element={<PrivateRoute><Board /></PrivateRoute>} />
-        <Route path="/join/:shareLink"       element={<PrivateRoute><Join /></PrivateRoute>} />
+        <Route path="/"                      element={<PageTransition><Landing /></PageTransition>} />
+        <Route path="/login"                 element={<PublicRoute><PageTransition><Login /></PageTransition></PublicRoute>} />
+        <Route path="/register"              element={<PublicRoute><PageTransition><Register /></PageTransition></PublicRoute>} />
+        <Route path="/verify-email"          element={<PageTransition><VerifyEmail /></PageTransition>} />
+        <Route path="/forgot-password"       element={<PublicRoute><PageTransition><ForgotPassword /></PageTransition></PublicRoute>} />
+        <Route path="/reset-password/:token" element={<PublicRoute><PageTransition><ResetPassword /></PageTransition></PublicRoute>} />
+        <Route path="/dashboard"             element={<PrivateRoute><PageTransition><Dashboard /></PageTransition></PrivateRoute>} />
+        <Route path="/board/:roomId"         element={<PrivateRoute><PageTransition><Board /></PageTransition></PrivateRoute>} />
+        <Route path="/join/:shareLink"       element={<PrivateRoute><PageTransition><Join /></PageTransition></PrivateRoute>} />
       </Routes>
     </BrowserRouter>
   )
