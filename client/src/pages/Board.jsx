@@ -305,7 +305,11 @@ export default function Board() {
       if (!isMounted) return
 
       dbLoadedRef.current = true
-      const backendUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000'
+      const backendUrl = import.meta.env.VITE_API_URL || (
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+          ? 'http://127.0.0.1:5000'
+          : 'https://ideaslate-server.onrender.com'
+      )
       socketRef.current = io(backendUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
       socketRef.current.on('connect', () => console.log('[SOCKET] connected:', socketRef.current.id))
       socketRef.current.on('connect_error', (e) => console.error('[SOCKET] error:', e.message))
@@ -353,7 +357,10 @@ export default function Board() {
       })
 
       const safeEmitObject = (obj) => {
-        if (!isReceiving.current) emitObject(obj)
+        if (!isReceiving.current) {
+          emitObject(obj)
+          emitCanvas()
+        }
       }
 
       canvas.on('object:added', (e) => {
