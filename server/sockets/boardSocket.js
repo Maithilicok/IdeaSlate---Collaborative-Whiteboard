@@ -6,6 +6,7 @@ export const initSocket = (io) => {
       const roomId = typeof rawRoomId === 'object' ? (rawRoomId?.roomId || rawRoomId?.id) : String(rawRoomId)
       socket.join(roomId)
       console.log(`[SOCKET] User ${socket.id} joined room: "${roomId}"`)
+      socket.emit('joined-room-success', { roomId, socketId: socket.id })
 
       // Ask an existing member to push full canvas to the new joiner
       const roomSockets = io.sockets.adapter.rooms.get(roomId)
@@ -30,6 +31,7 @@ export const initSocket = (io) => {
     socket.on('canvas:draw', (payload) => {
       const roomId = String(payload?.roomId || payload)
       const data = payload?.data !== undefined ? payload.data : payload
+      console.log(`[SOCKET] canvas:draw broadcast for room "${roomId}"`)
       socket.to(roomId).emit('canvas:draw', data)
     })
 
@@ -37,6 +39,7 @@ export const initSocket = (io) => {
     socket.on('canvas:object', (payload) => {
       const roomId = String(payload?.roomId || payload)
       const data = payload?.data !== undefined ? payload.data : payload
+      console.log(`[SOCKET] canvas:object broadcast for room "${roomId}"`)
       socket.to(roomId).emit('canvas:object', { data })
     })
 
@@ -58,6 +61,7 @@ export const initSocket = (io) => {
 
     socket.on('canvas:clear', (payload) => {
       const roomId = String(payload?.roomId || payload)
+      console.log(`[SOCKET] canvas:clear broadcast for room "${roomId}"`)
       socket.to(roomId).emit('canvas:clear')
     })
 
