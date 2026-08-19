@@ -9,14 +9,14 @@ export const connectDB = async () => {
   try {
     console.log(`Connecting to MongoDB...`)
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 })
-    console.log('MongoDB connected successfully')
+    console.log('✅ Connected to MongoDB Atlas cluster successfully!')
   } catch (err) {
-    console.error('Primary MongoDB connection error:', err.message)
+    console.error('❌ Primary MongoDB Atlas connection failed:', err.message)
     if (uri !== localUri) {
       try {
-        console.log('Attempting local MongoDB fallback at:', localUri)
+        console.warn('⚠️ WARNING: Falling back to LOCAL MongoDB database at:', localUri)
         await mongoose.connect(localUri, { serverSelectionTimeoutMS: 5000 })
-        console.log('MongoDB connected to local database successfully!')
+        console.log('Connected to LOCAL MongoDB fallback.')
       } catch (fallbackErr) {
         console.error('MongoDB connection failed completely:', fallbackErr.message)
       }
