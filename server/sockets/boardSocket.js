@@ -23,9 +23,27 @@ export const initSocket = (io) => {
       io.to(targetSocketId).emit('canvas:draw', data)
     })
 
-    // Broadcast every stroke to everyone else in the room
+    // Full canvas broadcast (join sync, delete, clear)
     socket.on('canvas:draw', ({ roomId, data }) => {
       socket.to(roomId).emit('canvas:draw', data)
+    })
+
+    // Delta object sync (add / modify single object)
+    socket.on('canvas:object', ({ roomId, data }) => {
+      socket.to(roomId).emit('canvas:object', { data })
+    })
+
+    // Live pointer streaming — broadcast to everyone else in room instantly
+    socket.on('canvas:pointer:start', ({ roomId, id, color, width, x, y }) => {
+      socket.to(roomId).emit('canvas:pointer:start', { id, color, width, x, y })
+    })
+
+    socket.on('canvas:pointer:move', ({ roomId, id, x, y }) => {
+      socket.to(roomId).emit('canvas:pointer:move', { id, x, y })
+    })
+
+    socket.on('canvas:pointer:end', ({ roomId, id }) => {
+      socket.to(roomId).emit('canvas:pointer:end', { id })
     })
 
     socket.on('canvas:clear', (roomId) => {
