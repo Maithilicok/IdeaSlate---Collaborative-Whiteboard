@@ -8,12 +8,14 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
+  const [resetData, setResetData] = useState(null)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     try {
-      await api.post('/auth/forgot-password', { email })
+      const res = await api.post('/auth/forgot-password', { email })
+      setResetData(res.data)
       setSent(true)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Something went wrong')
@@ -36,6 +38,18 @@ export default function ForgotPassword() {
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', lineHeight: '1.6' }}>
             A reset link has been sent to <b style={{ color: 'var(--text-primary)' }}>{email}</b>. It expires in 30 minutes.
           </p>
+
+          {resetData?.resetToken && (
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--accent-subtle)', borderRadius: '12px', border: '1px solid var(--accent)' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '10px' }}>
+                Instant Dev Link:
+              </p>
+              <Link to={`/reset-password/${resetData.resetToken}`} className="btn btn-primary" style={{ display: 'inline-block', padding: '10px 20px', fontSize: '14px', borderRadius: '100px', textDecoration: 'none' }}>
+                Reset Password Directly →
+              </Link>
+            </div>
+          )}
+
           <Link to="/login" style={{ display: 'inline-block', marginTop: '1.5rem', color: 'var(--accent)', fontWeight: '600', textDecoration: 'none', fontSize: '14px' }}>
             ← Back to login
           </Link>

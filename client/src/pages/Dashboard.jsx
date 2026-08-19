@@ -55,7 +55,7 @@ function Modal({ show, onClose, children }) {
   )
 }
 
-function BoardMenu({ isOwner, onRename, onDelete, onCopyLink }) {
+function BoardMenu({ room, isOwner, onRename, onDelete, onCopyLink }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 

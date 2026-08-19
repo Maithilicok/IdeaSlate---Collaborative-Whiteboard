@@ -21,7 +21,7 @@ export default function Join() {
       }
     }
     join()
-  }, [shareLink, navigate])
+  }, [shareLink])
 
   return (
     <div style={{

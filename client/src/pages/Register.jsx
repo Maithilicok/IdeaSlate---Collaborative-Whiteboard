@@ -19,7 +19,7 @@ export default function Register() {
     try {
 const res = await api.post('/auth/register', { fullName, email, password })
       toast.success('Check your email for the verification code!')
-      navigate('/verify-email', { state: { email: res.data.email } })
+      navigate('/verify-email', { state: { email: res.data.email, devOtp: res.data.devOtp } })
     } catch (err) {
       toast.error(err.response?.data?.message || 'Registration failed')
     } finally {

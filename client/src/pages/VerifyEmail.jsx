@@ -18,8 +18,12 @@ export default function VerifyEmail() {
   const inputs = useRef([])
 
   useEffect(() => {
-    if (!email) navigate('/register')
-  }, [email, navigate])
+    if (!email) {
+      navigate('/register')
+    } else if (state?.devOtp && String(state.devOtp).length === 6) {
+      setOtp(String(state.devOtp).split(''))
+    }
+  }, [email, state?.devOtp])
 
   useEffect(() => {
     if (countdown === 0) return
@@ -70,10 +74,14 @@ export default function VerifyEmail() {
   const handleResend = async () => {
     setResending(true)
     try {
-      await api.post('/auth/resend-otp', { email })
+      const res = await api.post('/auth/resend-otp', { email })
       toast.success('New code sent!')
       setCountdown(60)
-      setOtp(['', '', '', '', '', ''])
+      if (res.data?.devOtp && String(res.data.devOtp).length === 6) {
+        setOtp(String(res.data.devOtp).split(''))
+      } else {
+        setOtp(['', '', '', '', '', ''])
+      }
       inputs.current[0]?.focus()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to resend')

@@ -16,7 +16,7 @@ export function ThemeProvider({ children }) {
     try {
       localStorage.setItem('ideaslate-theme', theme)
     } catch {
-      // ignore
+      
     }
   }, [theme])
 
@@ -30,5 +30,4 @@ export function ThemeProvider({ children }) {
   )
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useTheme = () => useContext(ThemeContext)
