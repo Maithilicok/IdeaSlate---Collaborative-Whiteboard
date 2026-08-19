@@ -268,7 +268,7 @@ export default function Board() {
         if (isReceiving.current) return
         socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(canvas.toJSON(['id'])) })
       }
-      const emitCanvas = throttle(emitFullCanvas, 300)
+      const emitCanvas = emitFullCanvas
 
       const emitObject = (obj) => {
         if (isReceiving.current || !obj) return
@@ -337,7 +337,11 @@ export default function Board() {
           const existing = canvas.getObjects().find(o => o.id === data.id)
           if (existing) canvas.remove(existing)
           const objs = await util.enlivenObjects([data])
-          if (objs[0]) { canvas.add(objs[0]); canvas.renderAll() }
+          if (objs[0]) {
+            objs[0].id = data.id
+            canvas.add(objs[0])
+            canvas.renderAll()
+          }
         } catch (e) {
           console.error('canvas:object error', e)
         } finally {
@@ -357,28 +361,41 @@ export default function Board() {
       })
 
       const safeEmitObject = (obj) => {
-        if (!isReceiving.current) {
+        if (!isReceiving.current && obj) {
           emitObject(obj)
-          emitCanvas()
+          emitFullCanvas()
         }
       }
 
-      canvas.on('object:added', (e) => {
-        if (isReceiving.current) return
-        const obj = e.target
+      const handleNewObject = (obj) => {
+        if (isReceiving.current || !obj) return
         if (!obj.id) obj.id = crypto.randomUUID()
         if (obj.type === 'path' && activeToolRef.current === 'smart') {
           const t = recogniseShape(obj)
           if (t) {
             const p = createPerfectShape(fabricModuleRef.current, obj, t, strokeColorRef.current, strokeWidthRef.current)
-            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); safeEmitObject(p); saveUndoState(); return }
+            if (p) {
+              canvas.remove(obj)
+              canvas.add(p)
+              canvas.renderAll()
+              safeEmitObject(p)
+              saveUndoState()
+              return
+            }
           }
         }
         safeEmitObject(obj)
         saveUndoState()
+      }
+
+      canvas.on('path:created', (opt) => handleNewObject(opt.path || opt.target))
+      canvas.on('object:added', (e) => {
+        if (e.target && e.target.type !== 'path') {
+          handleNewObject(e.target)
+        }
       })
       canvas.on('object:modified', (e) => { safeEmitObject(e.target); saveUndoState() })
-      canvas.on('object:removed',  () => { emitCanvas(); saveUndoState() })
+      canvas.on('object:removed',  () => { emitFullCanvas(); saveUndoState() })
 
       // SWEEP & CLICK OBJECT ERASER DISPATCHER
       const eraseAtPointer = (opt) => {
