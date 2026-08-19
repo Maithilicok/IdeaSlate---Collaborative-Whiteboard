@@ -76,10 +76,14 @@ const otpEmailHtml = (otp) => `
 router.post('/register', async (req, res) => {
   try {
     const { fullName, email, password } = req.body
+    if (!email || !password || !fullName) {
+      return res.status(400).json({ message: 'All fields are required' })
+    }
+    const cleanEmail = email.trim().toLowerCase()
 
-    const userExists = await User.findOne({ email })
+    const userExists = await User.findOne({ email: cleanEmail })
     if (userExists && userExists.isVerified) {
-      return res.status(400).json({ message: 'User already exists' })
+      return res.status(400).json({ message: 'This email is already registered. Please log in instead.' })
     }
 
     const salt = await bcrypt.genSalt(10)
@@ -96,16 +100,17 @@ router.post('/register', async (req, res) => {
       user = await userExists.save()
     } else {
       user = await User.create({
-        name: fullName, email,
+        name: fullName,
+        email: cleanEmail,
         password: hashedPassword,
         otp, otpExpires
       })
     }
 
-    console.log(`[VERIFICATION OTP] Verification code for ${email}: ${otp}`)
+    console.log(`[VERIFICATION OTP] Verification code for ${cleanEmail}: ${otp}`)
 
     await sendEmail({
-      to: email,
+      to: cleanEmail,
       subject: 'Your IdeaSlate verification code',
       html: otpEmailHtml(otp)
     })
@@ -121,8 +126,10 @@ router.post('/register', async (req, res) => {
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body
+    if (!email) return res.status(400).json({ message: 'Email is required' })
+    const cleanEmail = email.trim().toLowerCase()
 
-    const user = await User.findOne({ email })
+    const user = await User.findOne({ email: cleanEmail })
     if (!user) return res.status(404).json({ message: 'User not found' })
     if (user.isVerified) return res.status(400).json({ message: 'Email already verified' })
     if (!user.otp || user.otp !== otp) return res.status(400).json({ message: 'Invalid OTP' })
@@ -147,8 +154,10 @@ router.post('/verify-otp', async (req, res) => {
 router.post('/resend-otp', async (req, res) => {
   try {
     const { email } = req.body
+    if (!email) return res.status(400).json({ message: 'Email is required' })
+    const cleanEmail = email.trim().toLowerCase()
 
-    const user = await User.findOne({ email })
+    const user = await User.findOne({ email: cleanEmail })
     if (!user) return res.status(404).json({ message: 'User not found' })
     if (user.isVerified) return res.status(400).json({ message: 'Email already verified' })
 
@@ -157,10 +166,10 @@ router.post('/resend-otp', async (req, res) => {
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000)
     await user.save()
 
-    console.log(`[VERIFICATION OTP] Resent code for ${email}: ${otp}`)
+    console.log(`[VERIFICATION OTP] Resent code for ${cleanEmail}: ${otp}`)
 
     await sendEmail({
-      to: email,
+      to: cleanEmail,
       subject: 'Your new IdeaSlate verification code',
       html: otpEmailHtml(otp)
     })
@@ -176,8 +185,10 @@ router.post('/resend-otp', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body
+    if (!email || !password) return res.status(400).json({ message: 'Email and password are required' })
+    const cleanEmail = email.trim().toLowerCase()
 
-    const user = await User.findOne({ email })
+    const user = await User.findOne({ email: cleanEmail })
     if (!user) return res.status(400).json({ message: 'Invalid credentials' })
 
     const isMatch = await bcrypt.compare(password, user.password)
@@ -188,15 +199,15 @@ router.post('/login', async (req, res) => {
       user.otp = otp
       user.otpExpires = new Date(Date.now() + 10 * 60 * 1000)
       await user.save()
-      console.log(`[VERIFICATION OTP] Verification code for ${email}: ${otp}`)
+      console.log(`[VERIFICATION OTP] Verification code for ${cleanEmail}: ${otp}`)
       await sendEmail({
-        to: email,
+        to: cleanEmail,
         subject: 'Your IdeaSlate verification code',
         html: otpEmailHtml(otp)
       })
       return res.status(403).json({
         message: 'Please verify your email first. A new code has been sent.',
-        email,
+        email: cleanEmail,
         devOtp: otp,
         needsVerification: true
       })
@@ -232,7 +243,10 @@ router.get('/me', protect, (req, res) => {
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body
-    const user = await User.findOne({ email })
+    if (!email) return res.status(400).json({ message: 'Email is required' })
+    const cleanEmail = email.trim().toLowerCase()
+
+    const user = await User.findOne({ email: cleanEmail })
 
     if (!user) return res.json({ message: 'If that email exists, a reset link has been sent.' })
 

@@ -42,10 +42,10 @@ export default function ForgotPassword() {
           {resetData?.resetToken && (
             <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--accent-subtle)', borderRadius: '12px', border: '1px solid var(--accent)' }}>
               <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '10px' }}>
-                Instant Dev Link:
+                Direct Reset Link:
               </p>
               <Link to={`/reset-password/${resetData.resetToken}`} className="btn btn-primary" style={{ display: 'inline-block', padding: '10px 20px', fontSize: '14px', borderRadius: '100px', textDecoration: 'none' }}>
-                Reset Password Directly →
+                Reset Password Now →
               </Link>
             </div>
           )}

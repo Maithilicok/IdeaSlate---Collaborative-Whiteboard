@@ -21,7 +21,7 @@ export default function Login() {
     } catch (err) {
       if (err.response?.data?.needsVerification) {
         toast.error('Please verify your email. A new code has been sent.')
-        navigate('/verify-email', { state: { email: err.response.data.email } })
+        navigate('/verify-email', { state: { email: err.response.data.email, devOtp: err.response.data.devOtp } })
         return
       }
       toast.error(err.response?.data?.message || 'Login failed')
