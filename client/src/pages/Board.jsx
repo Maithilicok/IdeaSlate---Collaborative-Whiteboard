@@ -2,11 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 import { useAuth } from '../context/useAuth'
-import { Logo, LogoWordmark } from '../components/Logo'
+import { LogoWordmark } from '../components/Logo'
 import { io } from 'socket.io-client'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
-
 
 function extractPoints(path) {
   const pts = []
@@ -128,7 +127,6 @@ function createPerfectShape(fab, path, type, color, width) {
   return null
 }
 
-// FIX #4: Simple throttle helper — no lodash needed
 function throttle(fn, ms) {
   let last = 0, timer = null
   return (...args) => {
@@ -144,6 +142,16 @@ function throttle(fn, ms) {
   }
 }
 
+const COLOR_SWATCHES = [
+  '#A100FF', // Accenture Purple
+  '#3B82F6', // Blue
+  '#10B981', // Emerald Green
+  '#EF4444', // Red
+  '#F59E0B', // Amber
+  '#FFFFFF', // White
+  '#1B1B24'  // Dark Charcoal
+]
+
 const TOOLS = [
   { id:'draw',     label:'Draw',       icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
   { id:'smart',    label:'Smart draw', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
@@ -154,7 +162,6 @@ const TOOLS = [
   { id:'triangle', label:'Triangle',   icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="12 3 22 21 2 21"/></svg> },
   { id:'select',   label:'Select',     icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 3l14 9-7 2-4 7z"/></svg> },
 ]
-
 
 export default function Board() {
   const { roomId }             = useParams()
@@ -167,38 +174,79 @@ export default function Board() {
   const fabricModuleRef = useRef(null)
   const socketRef       = useRef(null)
   const isReceiving     = useRef(false)
-  // FIX #2: track whether DB canvas has finished loading before accepting socket updates
   const dbLoadedRef     = useRef(false)
   const activeToolRef   = useRef('draw')
-  const strokeColorRef  = useRef('#4ade80')
+  const strokeColorRef  = useRef('#A100FF')
   const strokeWidthRef  = useRef(3)
 
+  const undoStackRef    = useRef([])
+  const redoStackRef    = useRef([])
+
   const [activeTool,  setActiveTool]  = useState('draw')
-  const [strokeColor, setStrokeColor] = useState('#4ade80')
+  const [strokeColor, setStrokeColor] = useState('#A100FF')
   const [strokeWidth, setStrokeWidth] = useState(3)
+  const [zoomLevel,   setZoomLevel]   = useState(100)
 
   const dark        = theme === 'dark'
-  const bg          = dark ? '#080e08' : '#f4fbf4'
-  const surface     = dark ? '#0d180d' : '#eaf6ea'
-  const border      = dark ? '#1a341a' : '#c2ddc2'
-  const textPrimary = dark ? '#deeede' : '#0a180a'
-  const textMuted   = dark ? '#527a52' : '#4a7a4a'
-  const accent      = '#4ade80'
+  const bg          = dark ? '#050508' : '#faf9fb'
+  const surface     = dark ? '#0c0c12' : '#f3f0f6'
+  const border      = dark ? '#1b1b26' : '#e2dbeb'
+  const textPrimary = dark ? '#ffffff' : '#1b0033'
+  const textMuted   = dark ? '#8f8fa3' : '#6b587d'
+  const accent      = '#A100FF'
 
   useEffect(() => {
     if (!fabricRef.current) return
     fabricRef.current.backgroundColor = bg
     fabricRef.current.renderAll()
-  }, [theme, bg])
+  }, [theme])
+
+  const saveUndoState = () => {
+    if (!fabricRef.current || isReceiving.current) return
+    try {
+      const json = JSON.stringify(fabricRef.current.toJSON(['id']))
+      undoStackRef.current.push(json)
+      if (undoStackRef.current.length > 30) undoStackRef.current.shift()
+      redoStackRef.current = []
+    } catch {}
+  }
+
+  const handleUndo = async () => {
+    if (!fabricRef.current || undoStackRef.current.length === 0) return
+    const current = JSON.stringify(fabricRef.current.toJSON(['id']))
+    redoStackRef.current.push(current)
+    const prev = undoStackRef.current.pop()
+    isReceiving.current = true
+    try {
+      await fabricRef.current.loadFromJSON(JSON.parse(prev))
+      fabricRef.current.renderAll()
+      socketRef.current?.emit('canvas:draw', { roomId, data: prev })
+    } catch {} finally {
+      setTimeout(() => { isReceiving.current = false }, 50)
+    }
+  }
+
+  const handleRedo = async () => {
+    if (!fabricRef.current || redoStackRef.current.length === 0) return
+    const next = redoStackRef.current.pop()
+    const current = JSON.stringify(fabricRef.current.toJSON(['id']))
+    undoStackRef.current.push(current)
+    isReceiving.current = true
+    try {
+      await fabricRef.current.loadFromJSON(JSON.parse(next))
+      fabricRef.current.renderAll()
+      socketRef.current?.emit('canvas:draw', { roomId, data: next })
+    } catch {} finally {
+      setTimeout(() => { isReceiving.current = false }, 50)
+    }
+  }
 
   useEffect(() => {
     let canvas, cleanKeys, cleanResize
-    // FIX #6: isMounted guard — prevents setState / canvas ops after unmount
     let isMounted = true
 
     const init = async () => {
       const fab = await import('fabric')
-      // FIX #6: bail out if unmounted before async import resolved
       if (!isMounted) return
 
       fabricModuleRef.current = fab
@@ -208,6 +256,7 @@ export default function Board() {
         backgroundColor: bg,
         width: window.innerWidth - 224,
         height: window.innerHeight - 62,
+        preserveObjectStacking: true
       })
       fabricRef.current = canvas
 
@@ -215,51 +264,55 @@ export default function Board() {
       brush.color = strokeColorRef.current; brush.width = strokeWidthRef.current
       canvas.freeDrawingBrush = brush; canvas.isDrawingMode = true
 
-      // FIX #4: Throttle canvas emissions to max once per 100ms
-      const emitCanvasRaw = () => {
+      const emitFullCanvas = () => {
         if (isReceiving.current) return
         socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(canvas.toJSON(['id'])) })
       }
-      const emitCanvas = throttle(emitCanvasRaw, 100)
+      const emitCanvas = throttle(emitFullCanvas, 300)
+
+      const emitObject = (obj) => {
+        if (isReceiving.current || !obj) return
+        const d = obj.toObject(['id'])
+        socketRef.current?.emit('canvas:object', { roomId, data: d })
+      }
 
       const onKey = (e) => {
-        if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.matches('input,textarea')) {
+        if (e.target.matches('input,textarea')) return
+        if ((e.key === 'Delete' || e.key === 'Backspace')) {
           const a = canvas.getActiveObject()
-          if (a) { canvas.remove(a); canvas.renderAll(); emitCanvas() }
+          if (a) { canvas.remove(a); canvas.renderAll(); emitCanvas(); saveUndoState() }
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+          if (e.shiftKey) handleRedo()
+          else handleUndo()
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+          handleRedo()
         }
       }
       window.addEventListener('keydown', onKey)
       cleanKeys = () => window.removeEventListener('keydown', onKey)
 
-      // FIX #2 + #5: Load DB canvas first, mark done, THEN connect socket
       try {
         const res = await api.get(`/boards/${roomId}`, { withCredentials: true })
-        if (!isMounted) return // FIX #6: check again after await
+        if (!isMounted) return
         if (res.data.canvasJSON) {
-          // FIX #5: safe parse — handle both string and pre-parsed object
           const raw = res.data.canvasJSON
           const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
           await canvas.loadFromJSON(parsed)
           canvas.renderAll()
         }
-      } catch {
-        // ignore load errors (will start with blank canvas)
-      }
+      } catch {}
 
-      if (!isMounted) return // FIX #6: check again after second await
+      if (!isMounted) return
 
-      // FIX #2: Only NOW connect socket — DB state is already on canvas
       dbLoadedRef.current = true
       const backendUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000'
-      const socketUrl = backendUrl.replace(/\/api$/, '')
-      socketRef.current = io(socketUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
+      socketRef.current = io(backendUrl, { withCredentials: true, transports: ['websocket', 'polling'] })
       socketRef.current.on('connect', () => console.log('[SOCKET] connected:', socketRef.current.id))
       socketRef.current.on('connect_error', (e) => console.error('[SOCKET] error:', e.message))
       socketRef.current.emit('join-room', roomId)
 
       socketRef.current.on('canvas:draw', async (json) => {
-        if (!dbLoadedRef.current) return
-        if (isReceiving.current) return
+        if (!dbLoadedRef.current || isReceiving.current) return
         isReceiving.current = true
         try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
@@ -268,8 +321,23 @@ export default function Board() {
         } catch (e) {
           console.error('canvas:draw error', e)
         } finally {
-          // Add brief safety delay to let internal Fabric events (like object:added) flush
           setTimeout(() => { isReceiving.current = false }, 50)
+        }
+      })
+
+      socketRef.current.on('canvas:object', async ({ data }) => {
+        if (!dbLoadedRef.current || isReceiving.current) return
+        isReceiving.current = true
+        try {
+          const { util } = fabricModuleRef.current
+          const existing = canvas.getObjects().find(o => o.id === data.id)
+          if (existing) canvas.remove(existing)
+          const objs = await util.enlivenObjects([data])
+          if (objs[0]) { canvas.add(objs[0]); canvas.renderAll() }
+        } catch (e) {
+          console.error('canvas:object error', e)
+        } finally {
+          setTimeout(() => { isReceiving.current = false }, 30)
         }
       })
 
@@ -284,8 +352,8 @@ export default function Board() {
         socketRef.current?.emit('canvas:full:sync:to', { targetSocketId, data })
       })
 
-      const safeEmit = () => {
-        if (!isReceiving.current) emitCanvas()
+      const safeEmitObject = (obj) => {
+        if (!isReceiving.current) emitObject(obj)
       }
 
       canvas.on('object:added', (e) => {
@@ -296,13 +364,31 @@ export default function Board() {
           const t = recogniseShape(obj)
           if (t) {
             const p = createPerfectShape(fabricModuleRef.current, obj, t, strokeColorRef.current, strokeWidthRef.current)
-            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); safeEmit(); return }
+            if (p) { canvas.remove(obj); canvas.add(p); canvas.renderAll(); safeEmitObject(p); saveUndoState(); return }
           }
         }
-        safeEmit()
+        safeEmitObject(obj)
+        saveUndoState()
       })
-      canvas.on('object:modified', safeEmit)
-      canvas.on('object:removed',  safeEmit)
+      canvas.on('object:modified', (e) => { safeEmitObject(e.target); saveUndoState() })
+      canvas.on('object:removed',  () => { emitCanvas(); saveUndoState() })
+
+      // SWEEP & CLICK OBJECT ERASER DISPATCHER
+      const eraseAtPointer = (opt) => {
+        if (activeToolRef.current !== 'eraser') return
+        const evt = opt.e
+        if (evt && (evt.buttons === 1 || evt.type === 'mousedown')) {
+          const target = opt.target || canvas.findTarget(evt)
+          if (target) {
+            canvas.remove(target)
+            canvas.renderAll()
+            emitCanvas()
+            saveUndoState()
+          }
+        }
+      }
+      canvas.on('mouse:down', eraseAtPointer)
+      canvas.on('mouse:move', eraseAtPointer)
 
       const onResize = () => {
         canvas.setDimensions({ width: window.innerWidth-224, height: window.innerHeight-62 })
@@ -315,7 +401,6 @@ export default function Board() {
     init()
 
     return () => {
-      // FIX #6: set flag first so any in-flight awaits bail out cleanly
       isMounted = false
       dbLoadedRef.current = false
       cleanKeys?.()
@@ -323,7 +408,6 @@ export default function Board() {
       canvas?.dispose()
       socketRef.current?.disconnect()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 
   const applyTool = (tool) => {
@@ -336,20 +420,31 @@ export default function Board() {
 
     if (tool === 'draw' || tool === 'smart') {
       canvas.isDrawingMode = true
+      canvas.defaultCursor = 'default'
       const b = new PencilBrush(canvas); b.color = color; b.width = width; canvas.freeDrawingBrush = b
     } else if (tool === 'eraser') {
-      canvas.isDrawingMode = true
-      const b = new PencilBrush(canvas); b.color = canvas.backgroundColor||bg; b.width = 24; canvas.freeDrawingBrush = b
+      canvas.isDrawingMode = false
+      canvas.selection = false
+      canvas.defaultCursor = 'crosshair'
     } else if (tool === 'select') {
-      canvas.isDrawingMode = false; canvas.selection = true
+      canvas.isDrawingMode = false
+      canvas.selection = true
+      canvas.defaultCursor = 'default'
     } else if (tool === 'rect') {
-      canvas.isDrawingMode = false; canvas.add(new Rect({ ...common, left:160, top:160, width:160, height:100 })); canvas.renderAll()
+      canvas.isDrawingMode = false
+      canvas.defaultCursor = 'default'
+      canvas.add(new Rect({ ...common, left:160, top:160, width:160, height:100 })); canvas.renderAll()
     } else if (tool === 'circle') {
-      canvas.isDrawingMode = false; canvas.add(new Ellipse({ ...common, left:160, top:160, rx:70, ry:50 })); canvas.renderAll()
+      canvas.isDrawingMode = false
+      canvas.defaultCursor = 'default'
+      canvas.add(new Ellipse({ ...common, left:160, top:160, rx:70, ry:50 })); canvas.renderAll()
     } else if (tool === 'triangle') {
-      canvas.isDrawingMode = false; canvas.add(new Triangle({ ...common, left:160, top:160, width:120, height:100 })); canvas.renderAll()
+      canvas.isDrawingMode = false
+      canvas.defaultCursor = 'default'
+      canvas.add(new Triangle({ ...common, left:160, top:160, width:120, height:100 })); canvas.renderAll()
     } else if (tool === 'text') {
       canvas.isDrawingMode = false
+      canvas.defaultCursor = 'default'
       const t = new IText('Type here…', { left:160, top:160, fontSize:20, fill:color, fontFamily:'DM Sans', id:crypto.randomUUID() })
       canvas.add(t); canvas.setActiveObject(t); t.enterEditing(); canvas.renderAll()
     }
@@ -359,9 +454,8 @@ export default function Board() {
     strokeColorRef.current = color; strokeWidthRef.current = width
     if (!fabricRef.current) return
     const c = fabricRef.current
-    if (c.isDrawingMode && c.freeDrawingBrush) {
-      if (activeToolRef.current === 'eraser') c.freeDrawingBrush.width = 24
-      else { c.freeDrawingBrush.color = color; c.freeDrawingBrush.width = width }
+    if (c.isDrawingMode && c.freeDrawingBrush && activeToolRef.current !== 'eraser') {
+      c.freeDrawingBrush.color = color; c.freeDrawingBrush.width = width
     }
   }
 
@@ -371,6 +465,7 @@ export default function Board() {
     if (!a) return toast.error('Select an element first')
     fabricRef.current.remove(a); fabricRef.current.renderAll()
     socketRef.current?.emit('canvas:draw', { roomId, data: JSON.stringify(fabricRef.current.toJSON(['id'])) })
+    saveUndoState()
     toast.success('Deleted!')
   }
 
@@ -378,16 +473,45 @@ export default function Board() {
     if (!fabricRef.current) return
     fabricRef.current.clear(); fabricRef.current.backgroundColor = bg; fabricRef.current.renderAll()
     socketRef.current?.emit('canvas:clear', roomId)
+    saveUndoState()
   }
 
   const saveBoard = async () => {
     try {
       await api.put(`/boards/${roomId}`, { canvasJSON: JSON.stringify(fabricRef.current.toJSON(['id'])) }, { withCredentials: true })
-      toast.success('Board saved!')
+      toast.success('Board saved successfully!')
     } catch { toast.error('Failed to save') }
   }
 
-  const copyLink = () => { navigator.clipboard.writeText(window.location.href); toast.success('Link copied!') }
+  const exportPNG = () => {
+    if (!fabricRef.current) return
+    const dataUrl = fabricRef.current.toDataURL({ format: 'png', multiplier: 2 })
+    const link = document.createElement('a')
+    link.download = `ideaslate_${roomId.slice(0, 6)}.png`
+    link.href = dataUrl
+    link.click()
+    toast.success('Board exported as PNG!')
+  }
+
+  const handleZoom = (factor) => {
+    if (!fabricRef.current) return
+    const c = fabricRef.current
+    let newZoom = c.getZoom() * factor
+    if (newZoom > 3) newZoom = 3
+    if (newZoom < 0.3) newZoom = 0.3
+    c.setZoom(newZoom)
+    c.renderAll()
+    setZoomLevel(Math.round(newZoom * 100))
+  }
+
+  const resetZoom = () => {
+    if (!fabricRef.current) return
+    fabricRef.current.setZoom(1)
+    fabricRef.current.renderAll()
+    setZoomLevel(100)
+  }
+
+  const copyLink = () => { navigator.clipboard.writeText(window.location.href); toast.success('Room link copied!') }
 
   const SideBtn = ({ tool }) => {
     const active = activeTool === tool.id
@@ -396,12 +520,12 @@ export default function Board() {
         display: 'flex', alignItems: 'center', gap: '9px',
         padding: '8px 11px', borderRadius: '9px', width: '100%',
         border: active ? `1px solid ${accent}` : `1px solid ${border}`,
-        background: active ? (dark ? '#0d2a14' : '#dcfce7') : 'transparent',
+        background: active ? (dark ? 'var(--accent-subtle)' : '#eef2ff') : 'transparent',
         color: active ? accent : textMuted,
         cursor: 'pointer', fontSize: '13px', fontWeight: active ? '600' : '400',
         transition: 'all 0.15s',
       }}
-        onMouseEnter={e => { if (!active) { e.currentTarget.style.background = dark ? '#111e11' : '#f0fdf0'; e.currentTarget.style.color = textPrimary } }}
+        onMouseEnter={e => { if (!active) { e.currentTarget.style.background = dark ? '#15151e' : '#e2e8f0'; e.currentTarget.style.color = textPrimary } }}
         onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = textMuted } }}
       >
         <span style={{ opacity: active ? 1 : 0.75 }}>{tool.icon}</span>
@@ -413,21 +537,21 @@ export default function Board() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: bg, overflow: 'hidden' }}>
 
-      {/* ── Top navbar ── */}
+      {/* Top Navbar */}
       <nav style={{
         height: '62px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 1.2rem', borderBottom: `1px solid ${border}`,
+        padding: '0 1.4rem', borderBottom: `1px solid ${border}`,
         background: surface, zIndex: 50, flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <button
             onClick={() => navigate('/dashboard')}
             title="Back to dashboard"
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '4px 12px', borderRadius: '16px',
+              padding: '5px 14px', borderRadius: '16px',
               border: `1px solid ${border}`, background: 'transparent',
-              color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
+              color: textPrimary, cursor: 'pointer', fontSize: '12.5px', fontWeight: '500',
               transition: 'all 0.15s',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
@@ -435,16 +559,38 @@ export default function Board() {
           >
             ← Back
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '4px' }}>
-            <div style={{ width: 22, height: 22, background: accent, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 'bold', fontSize: '14px' }}>I</div>
-            <span style={{ fontSize: 16, fontWeight: '700', color: textPrimary, fontFamily: "'DM Sans', sans-serif" }}>IdeaSlate</span>
+          <div style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
+            <LogoWordmark size={24} />
+          </div>
+
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '3px 10px', borderRadius: '12px',
+            background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)',
+            fontSize: '11px', fontWeight: '600', color: '#10B981', marginLeft: '6px'
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} className="animate-pulse" />
+            LIVE SYNC
           </div>
         </div>
 
+        {/* Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Undo / Redo */}
+          <div style={{ display: 'flex', gap: '4px', marginRight: '6px' }}>
+            <button onClick={handleUndo} title="Undo (Ctrl+Z)" style={{
+              padding: '5px 10px', borderRadius: '8px', border: `1px solid ${border}`,
+              background: 'transparent', color: textPrimary, cursor: 'pointer', fontSize: '13px'
+            }}>↺</button>
+            <button onClick={handleRedo} title="Redo (Ctrl+Y)" style={{
+              padding: '5px 10px', borderRadius: '8px', border: `1px solid ${border}`,
+              background: 'transparent', color: textPrimary, cursor: 'pointer', fontSize: '13px'
+            }}>↻</button>
+          </div>
+
           <button onClick={toggleTheme} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '4px 12px', borderRadius: '16px',
+            padding: '5px 14px', borderRadius: '16px',
             border: `1px solid ${border}`, background: 'transparent',
             color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
             transition: 'all 0.15s',
@@ -457,9 +603,20 @@ export default function Board() {
               : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Dark</>
             }
           </button>
+          
+          <button onClick={exportPNG} title="Export board as PNG" style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '5px 14px', borderRadius: '16px',
+            border: `1px solid ${border}`, background: 'transparent',
+            color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
+            transition: 'all 0.15s',
+          }}>
+            ↓ Export
+          </button>
+
           <button onClick={copyLink} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '4px 12px', borderRadius: '16px',
+            padding: '5px 14px', borderRadius: '16px',
             border: `1px solid ${border}`, background: 'transparent',
             color: textPrimary, cursor: 'pointer', fontSize: '12px', fontWeight: '500',
             transition: 'all 0.15s',
@@ -469,74 +626,113 @@ export default function Board() {
           >
             Share
           </button>
+
           <button onClick={saveBoard} style={{
             display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '4px 16px', borderRadius: '16px',
+            padding: '5px 18px', borderRadius: '16px',
             border: `1px solid ${accent}`, background: accent,
-            color: '#000', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
-            transition: 'all 0.15s',
+            color: '#ffffff', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
+            boxShadow: '0 0 16px var(--accent-glow)', transition: 'all 0.15s',
           }}>
             Save
           </button>
+
           <div title={user?.fullName || user?.name} style={{
-            width: '28px', height: '28px', borderRadius: '50%',
-            background: 'transparent',
-            border: `1px solid ${accent}`,
+            width: '30px', height: '30px', borderRadius: '50%',
+            background: 'var(--accent-subtle)',
+            border: `1.5px solid ${accent}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: accent, fontWeight: '700', fontSize: '12px', userSelect: 'none',
+            color: accent, fontWeight: '700', fontSize: '13px', userSelect: 'none',
           }}>
             {(user?.fullName || user?.name || '?').charAt(0).toUpperCase()}
           </div>
         </div>
       </nav>
 
-      {/* ── Body: sidebar + canvas ── */}
+      {/* Main Body: sidebar + canvas */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        {/* ── Sidebar ── */}
+        {/* Sidebar Tools */}
         <aside style={{
-          width: '196px', flexShrink: 0,
+          width: '210px', flexShrink: 0,
           background: surface, borderRight: `1px solid ${border}`,
           display: 'flex', flexDirection: 'column',
-          padding: '12px 10px', gap: '4px', overflowY: 'auto',
+          padding: '14px 12px', gap: '4px', overflowY: 'auto',
         }}>
-          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 6px 6px' }}>Tools</div>
+          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '2px 6px 6px' }}>Drawing Tools</div>
           {TOOLS.map(t => <SideBtn key={t.id} tool={t} />)}
 
           {activeTool === 'smart' && (
             <div style={{
-              margin: '4px 6px 0',
+              margin: '4px 2px 0',
               padding: '10px',
               borderRadius: '8px',
-              background: dark ? '#0d2a14' : '#dcfce7',
+              background: 'var(--accent-subtle)',
               border: `1px solid ${accent}`,
               fontSize: '11px',
               color: accent,
               lineHeight: '1.4'
             }}>
-              ✨ Draw a circle, rect or straight line — snaps to perfect shape
+              ✨ Sketch freehand — snaps to circle, rect or triangle
             </div>
           )}
 
-          <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
+          {activeTool === 'eraser' && (
+            <div style={{
+              margin: '4px 2px 0',
+              padding: '10px',
+              borderRadius: '8px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              fontSize: '11px',
+              color: '#ef4444',
+              lineHeight: '1.4'
+            }}>
+              🧹 Sweep or click on any stroke/shape to erase it cleanly
+            </div>
+          )}
 
-          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Color</div>
+          <div style={{ height: '1px', background: border, margin: '12px 0 8px' }} />
+
+          {/* Preset Color Swatches */}
+          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Color Palette</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', padding: '0 4px', marginBottom: '6px' }}>
+            {COLOR_SWATCHES.map(c => (
+              <button
+                key={c}
+                onClick={() => {
+                  setStrokeColor(c)
+                  strokeColorRef.current = c
+                  updateBrush(c, strokeWidthRef.current)
+                }}
+                style={{
+                  width: '22px', height: '22px', borderRadius: '50%',
+                  background: c, border: strokeColor === c ? `2px solid ${accent}` : `1px solid ${border}`,
+                  cursor: 'pointer', transform: strokeColor === c ? 'scale(1.15)' : 'scale(1)',
+                  transition: 'transform 0.15s, border 0.15s'
+                }}
+              />
+            ))}
+          </div>
+
           <div style={{ padding: '0 4px' }}>
             <label style={{
-              width: '100%', height: '36px', borderRadius: '6px',
-              background: strokeColor, display: 'block', cursor: 'pointer',
-              border: `1px solid ${border}`
+              width: '100%', height: '32px', borderRadius: '8px',
+              background: strokeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+              border: `1px solid ${border}`, fontSize: '11px', fontWeight: '700', color: strokeColor === '#FFFFFF' ? '#000' : '#fff'
             }}>
+              Custom Color
               <input type="color" value={strokeColor} onChange={e => { setStrokeColor(e.target.value); strokeColorRef.current = e.target.value; updateBrush(e.target.value, strokeWidthRef.current) }}
                 style={{ opacity: 0, width: '1px', height: '1px' }} />
             </label>
           </div>
 
-          <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
+          <div style={{ height: '1px', background: border, margin: '12px 0 8px' }} />
 
-          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Stroke: {strokeWidth}px</div>
+          {/* Stroke Width Slider */}
+          <div style={{ fontSize: '10px', fontWeight: '700', color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px 6px' }}>Stroke Size: {strokeWidth}px</div>
           <div style={{ padding: '0 4px', display: 'flex', alignItems: 'center', height: '24px' }}>
-            <input type="range" min="1" max="20" value={strokeWidth}
+            <input type="range" min="1" max="24" value={strokeWidth}
               onChange={e => {
                 const w = Number(e.target.value)
                 setStrokeWidth(w)
@@ -548,12 +744,13 @@ export default function Board() {
 
           <div style={{ height: '1px', background: border, margin: '14px 0 10px' }} />
 
+          {/* Delete & Clear */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <button onClick={deleteSelected} style={{
               display: 'flex', alignItems: 'center', gap: '9px',
               padding: '8px 11px', borderRadius: '9px', width: '100%',
               border: `1px solid ${dark ? '#7f1d1d' : '#fca5a5'}`, background: 'transparent',
-              color: '#ef4444', cursor: 'pointer', fontSize: '13px',
+              color: '#ef4444', cursor: 'pointer', fontSize: '12.5px',
               transition: 'all 0.15s',
             }}
               onMouseEnter={e => { e.currentTarget.style.background = dark ? '#450a0a' : '#fee2e2' }}
@@ -568,7 +765,7 @@ export default function Board() {
               display: 'flex', alignItems: 'center', gap: '9px',
               padding: '8px 11px', borderRadius: '9px', width: '100%',
               border: `1px solid ${dark ? '#7f1d1d' : '#fca5a5'}`, background: 'transparent',
-              color: '#ef4444', cursor: 'pointer', fontSize: '13px',
+              color: '#ef4444', cursor: 'pointer', fontSize: '12.5px',
               transition: 'all 0.15s',
             }}
               onMouseEnter={e => { e.currentTarget.style.background = dark ? '#450a0a' : '#fee2e2' }}
@@ -582,9 +779,22 @@ export default function Board() {
           </div>
         </aside>
 
-        {/* ── Canvas ── */}
+        {/* Canvas Area */}
         <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <canvas ref={canvasRef} />
+
+          {/* Floating Zoom & Controls Widget */}
+          <div style={{
+            position: 'absolute', bottom: '20px', right: '20px',
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '6px 12px', borderRadius: '30px',
+            background: surface, border: `1px solid ${border}`,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)', zIndex: 40
+          }}>
+            <button onClick={() => handleZoom(0.85)} title="Zoom Out" style={{ background: 'none', border: 'none', color: textPrimary, cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>−</button>
+            <button onClick={resetZoom} title="Reset Zoom" style={{ background: 'none', border: 'none', color: textMuted, cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>{zoomLevel}%</button>
+            <button onClick={() => handleZoom(1.15)} title="Zoom In" style={{ background: 'none', border: 'none', color: textPrimary, cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>+</button>
+          </div>
         </main>
       </div>
     </div>
